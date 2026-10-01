@@ -346,8 +346,9 @@ jobs:
           jq -e '.critical == 0' < "${RUNNER_TEMP}/doctor.json"
           # Caddy is checked at the path the unit runs, against the pinned version.
           jq -e '.checks[] | select(.check == "runtime.caddy") | .ok' < "${RUNNER_TEMP}/doctor.json"
-          # All three supervisor sockets, not one.
-          jq -e '[.checks[] | select(.check | startswith("systemd.socket."))] | length == 3' \
+          # All three supervisor sockets, not one. The `.stale` check beside them
+          # is about leftovers in the run socket directory, not a socket.
+          jq -e '[.checks[] | select((.check | startswith("systemd.socket.")) and (.check | endswith(".stale") | not))] | length == 3' \
             < "${RUNNER_TEMP}/doctor.json"
 
       # The installer does not install the agent CLIs (deploy/install-manifest.json,
