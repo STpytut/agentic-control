@@ -1,0 +1,13 @@
+[Unit]
+Description=infra_cod runtime updates, every five minutes
+# A member of the target like the other timers: it stops with the stack.
+PartOf=infra-cod.target
+
+[Timer]
+OnCalendar=*:0/5
+RandomizedDelaySec=30
+Persistent=true
+Unit=infra-cod-runtime-update.service
+
+[Install]
+WantedBy=timers.target

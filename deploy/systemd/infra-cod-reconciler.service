@@ -1,0 +1,34 @@
+[Unit]
+Description=infra_cod workspace lease reconciler
+After=network-online.target postgresql@17-main.service
+Wants=network-online.target
+Wants=postgresql@17-main.service
+
+PartOf=infra-cod.target
+
+[Service]
+Type=simple
+User=infra-control
+Group=infra-control
+WorkingDirectory=/var/lib/infra-control
+Environment=CONTROL_PLANE_DB=infra_cod
+EnvironmentFile=-/etc/infra-cod/database.env
+Environment=PGUSER=infra_worker
+Environment=RECONCILER_ID=vps-reconciler-1
+Environment=RECONCILER_POLL_MS=60000
+ExecStart=/opt/node/bin/node /opt/infra-cod/current/services/control-plane/reconciler.mjs
+Restart=on-failure
+TimeoutStopSec=20
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+MemoryDenyWriteExecute=false
+TasksMax=64
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

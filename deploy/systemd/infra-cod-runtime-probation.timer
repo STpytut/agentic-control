@@ -1,0 +1,13 @@
+[Unit]
+Description=infra_cod runtime probation, every ten minutes
+# A member of the target like the other timers: it stops with the stack.
+PartOf=infra-cod.target
+
+[Timer]
+OnCalendar=*:0/10
+RandomizedDelaySec=60
+Persistent=true
+Unit=infra-cod-runtime-probation.service
+
+[Install]
+WantedBy=timers.target

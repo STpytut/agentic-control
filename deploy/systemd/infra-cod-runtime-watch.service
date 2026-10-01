@@ -1,0 +1,37 @@
+[Unit]
+Description=infra_cod runtime watch: newer versions in the registry (metadata only)
+# Stage 12 W2. Reads each runtime's package metadata from the npm registry and
+# records the newer versions for the panel. Nothing is downloaded or installed:
+# promoting a version stays an operator's command.
+After=network-online.target postgresql@17-main.service
+Wants=network-online.target
+Wants=postgresql@17-main.service
+
+PartOf=infra-cod.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=-/etc/infra-cod/database.env
+Environment=CONTROL_PLANE_DB=infra_cod
+# Root because /etc/infra-cod/runtimes.json, which says what is active, is
+# root's; the database half is the worker role, stated here like the health
+# snapshot's, and it holds EXECUTE on record_runtime_watch and nothing more of
+# this.
+Environment=PGUSER=infra_worker
+WorkingDirectory=/opt/infra-cod/current
+TimeoutStartSec=120
+ExecStart=/opt/node/bin/node /opt/infra-cod/current/services/cli/infra-cod.mjs runtime watch --record
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+LockPersonality=true
+# Node compiles JavaScript into executable memory.
+MemoryDenyWriteExecute=false
+TasksMax=32
+# Codex's package history is one 16 MB JSON document (2026-09).
+MemoryMax=512M

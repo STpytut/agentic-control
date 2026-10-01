@@ -1,0 +1,64 @@
+{
+  "schema": "infra-cod/install-manifest/2",
+  "product": "infra-cod",
+  "node": {
+    "version": "24.20.0",
+    "arch": "linux-x64",
+    "url": "https://nodejs.org/dist/v24.20.0/node-v24.20.0-linux-x64.tar.xz",
+    "sha256": "2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2",
+    "expectedVersion": "v24.20.0",
+    "installedBy": "installer"
+  },
+  "caddy": {
+    "version": "2.9.1",
+    "arch": "linux-amd64",
+    "url": "https://github.com/caddyserver/caddy/releases/download/v2.9.1/caddy_2.9.1_linux_amd64.tar.gz",
+    "sha256": "0542edbb5ce0d6987de6a37caa2bbc52a42445ec094fb9ba3e605534af5dd898",
+    "expectedVersion": "2.9.1",
+    "installedBy": "installer"
+  },
+  "agentRuntimes": {
+    "decision": "not-installed-by-installer",
+    "installedBy": "operator",
+    "plannedAutomation": "stage-11-onboarding",
+    "decidedOn": "2026-09-13",
+    "rationale": [
+      "The Codex and OpenCode CLIs are credential-bearing tools that each operator",
+      "authenticates individually, and they publish new versions on their own",
+      "cadence. Pinning a SHA-256 for them here would tie an infra-cod release to a",
+      "vendor build that is usually stale by the time the release is installed, and",
+      "would make a routine agent update a full reinstall.",
+      "Nothing in this repository installs them today. The runtime supervisor only",
+      "execs `codex` and `opencode` from a fixed PATH (/usr/local/bin:/usr/bin:/bin),",
+      "so on a host where they are absent the panel comes up and the first agent",
+      "task fails with ENOENT. Provisioning them is Stage 11 onboarding work.",
+      "Until then the contract is: the operator installs them onto the runtime PATH,",
+      "and `infra-cod doctor` reports runtime.agent_cli.codex / .opencode as a",
+      "warning naming exactly that, so an installation never looks complete when an",
+      "agent cannot start.",
+      "What the installer does guarantee is everything a workspace needs before an",
+      "agent can run at all: git, the pinned Node, Caddy, PostgreSQL 17 and the unit",
+      "set."
+    ],
+    "runtimePath": "/usr/local/bin:/usr/bin:/bin",
+    "codex-cli": { "installedBy": "operator", "pinned": false, "checkedBy": "infra-cod doctor" },
+    "opencode-cli": { "installedBy": "operator", "pinned": false, "checkedBy": "infra-cod doctor" }
+  },
+  "operatingSystem": "ubuntu",
+  "osVersion": "24.04",
+  "architecture": "x86_64",
+  "packageDependencies": [
+    "ca-certificates",
+    "curl",
+    "git",
+    "jq",
+    "minisign",
+    "postgresql-17",
+    "postgresql-client-17"
+  ],
+  "packageNotes": {
+    "git": "Required at runtime: every project workspace is cloned with it. Installed by install.sh and checked by `infra-cod doctor`.",
+    "postgresql-17": "Installed from PGDG, which install.sh configures first — neither postgresql-17 nor postgresql-client-17 exists in Ubuntu 24.04's own archive.",
+    "minisign": "Needed by the pre-install gate to verify the release signature before anything is written to /opt."
+  }
+}

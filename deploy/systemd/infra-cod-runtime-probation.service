@@ -1,0 +1,33 @@
+[Unit]
+Description=infra_cod runtime probation: roll back a promoted runtime that fails
+# Stage 12 W4b (R11). After `infra-cod runtime promote`, the promoted version
+# is on probation for three task runs or a day. This reads the database's
+# verdict and, on a runtime-class failure at that version, runs the same fenced
+# rollback an operator would. A model's or a provider's failure never does.
+# With no probation open it reads four rows and exits.
+After=network-online.target postgresql@17-main.service infra-cod-runtime-supervisor.service
+Wants=postgresql@17-main.service
+
+PartOf=infra-cod.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=-/etc/infra-cod/database.env
+Environment=CONTROL_PLANE_DB=infra_cod
+# Root, like `infra-cod runtime rollback`: the switch rewrites the link in
+# /usr/local/bin and /etc/infra-cod/runtimes.json, and smoke-tests the version
+# it switches to as the runtime's own user in its home — so this unit cannot
+# have ProtectSystem or ProtectHome. The database half is the worker role,
+# which holds EXECUTE on the probation functions and nothing more of this.
+Environment=PGUSER=infra_worker
+WorkingDirectory=/opt/infra-cod/current
+TimeoutStartSec=120
+ExecStart=/opt/node/bin/node /opt/infra-cod/current/services/cli/infra-cod.mjs runtime probation --apply
+PrivateTmp=true
+LockPersonality=true
+# Node compiles JavaScript into executable memory.
+MemoryDenyWriteExecute=false
+TasksMax=64
+MemoryMax=512M

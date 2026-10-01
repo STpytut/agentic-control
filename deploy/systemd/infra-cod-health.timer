@@ -1,0 +1,20 @@
+[Unit]
+Description=Periodic infra_cod health and metrics snapshot
+# Same as the backup timer: membership is what propagates the stop. A health
+# snapshot that keeps running every minute after the target was stopped reports on
+# a stack that is intentionally down.
+PartOf=infra-cod.target
+
+[Timer]
+# Relative to when this timer is activated, not to boot. `OnBootSec=2m` on a
+# machine that booted hours ago is a deadline already in the past, so enabling
+# the timer fired a health snapshot immediately — concurrently with the rest of
+# the stack still coming up, which is the one moment its answer is meaningless.
+OnActiveSec=2m
+OnUnitActiveSec=1m
+AccuracySec=10s
+Persistent=true
+Unit=infra-cod-health.service
+
+[Install]
+WantedBy=timers.target

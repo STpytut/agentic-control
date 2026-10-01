@@ -1,0 +1,79 @@
+[Unit]
+Description=infra_cod edge (Caddy) - TLS termination and the only published port
+Documentation=file:/opt/infra-cod/current/docs/OPERATIONS.md
+# Caddy must be up whenever the panel is, because it is the only thing that serves
+# the panel to a browser. It does not wait for the panel to be *ready*:
+# `lb_try_duration` in the Caddyfile retries the request against the upstream, so
+# a panel that is still booting is a slow first request rather than a 502.
+After=network-online.target infra-cod-web.service
+Wants=network-online.target
+PartOf=infra-cod.target
+
+[Service]
+Type=simple
+# Not root. The only privileged thing Caddy does here is bind 80 and 443, and the
+# capability below grants exactly that. The ACME account key and the issued
+# certificates live under /var/lib/caddy, owned by this account and readable by
+# nobody else.
+User=caddy
+Group=caddy
+
+# The mode is chosen by which file is loaded, not by an environment variable that
+# may or may not have been exported: `Caddyfile` is the public domain with ACME
+# and HSTS, `Caddyfile.local` is plain HTTP with no certificates and no HSTS.
+# Swapping the file is a deliberate act, and the two are never mixed.
+WorkingDirectory=/opt/infra-cod/current
+Environment=INFRA_COD_CADDY_CONFIG=/etc/infra-cod/caddy/Caddyfile
+
+# Where the ACME account key, the certificates and the autosaved configuration
+# go. Set explicitly because a missing HOME would otherwise send them to a path
+# derived from an unset variable.
+Environment=HOME=/var/lib/caddy
+Environment=XDG_DATA_HOME=/var/lib/caddy
+Environment=XDG_CONFIG_HOME=/var/lib/caddy/config
+
+# INFRA_COD_DOMAIN and INFRA_COD_ACME_EMAIL for the public file; INFRA_COD_HOST
+# and INFRA_COD_PORT for the local one. Every one of these must agree with the
+# panel's INFRA_COD_SITE_URL, which is the origin the CSRF check compares
+# against; a mismatch turns every mutating request into a refusal.
+EnvironmentFile=/etc/infra-cod/caddy.env
+
+# A configuration that fails validation never replaces a working one: the check
+# runs before the process starts and on every reload.
+ExecStartPre=/usr/bin/caddy validate --config ${INFRA_COD_CADDY_CONFIG}
+ExecStart=/usr/bin/caddy run --config ${INFRA_COD_CADDY_CONFIG}
+ExecReload=/usr/bin/caddy reload --config ${INFRA_COD_CADDY_CONFIG}
+
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=20
+KillMode=mixed
+UMask=0027
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+LockPersonality=true
+MemoryDenyWriteExecute=false
+TasksMax=128
+MemoryMax=512M
+
+# The one privilege: binding a port below 1024. Everything else about this unit is
+# unprivileged, which is the point of not running it as root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# Certificate storage and the access log. Both are writable directories outside
+# the read-only filesystem, so the process never needs the release tree.
+StateDirectory=caddy
+StateDirectoryMode=0700
+LogsDirectory=caddy
+LogsDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target

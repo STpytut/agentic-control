@@ -1,0 +1,36 @@
+[Unit]
+Description=infra_cod runtime updates: the panel's qualify and promote, and qualifying a newer version
+# Stage 12, 0127. One action a pass: a Qualify or Promote pressed in the panel,
+# run through the same code as `infra-cod runtime qualify|promote`; otherwise
+# the newest version of an installed runtime that nobody has qualified yet, run
+# beside the active one and changing nothing, while its subscription is under
+# 80 %. Promoting stays the owner's press.
+After=network-online.target postgresql@17-main.service infra-cod-runtime-supervisor.service
+Wants=network-online.target
+Wants=postgresql@17-main.service
+
+PartOf=infra-cod.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+EnvironmentFile=-/etc/infra-cod/database.env
+Environment=CONTROL_PLANE_DB=infra_cod
+# Root, like `infra-cod runtime qualify|promote`: a candidate is installed
+# beside the active version, smoke-tested as the runtime's own user in its home,
+# and a promotion rewrites the link in /usr/local/bin and
+# /etc/infra-cod/runtimes.json — so this unit cannot have ProtectSystem or
+# ProtectHome. The database half is the worker role.
+Environment=PGUSER=infra_worker
+WorkingDirectory=/opt/infra-cod/current
+# A qualification runs for minutes, and a promotion waits up to ten for the
+# runtime to be idle.
+TimeoutStartSec=45min
+ExecStart=/opt/node/bin/node /opt/infra-cod/current/services/cli/infra-cod.mjs runtime updates --apply
+PrivateTmp=true
+LockPersonality=true
+# Node compiles JavaScript into executable memory.
+MemoryDenyWriteExecute=false
+TasksMax=128
+MemoryMax=1G

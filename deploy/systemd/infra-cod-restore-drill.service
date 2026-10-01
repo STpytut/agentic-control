@@ -1,0 +1,46 @@
+[Unit]
+Description=infra_cod isolated backup restore drill
+# The restore target is its own cluster, `17/restore` on 5433 (ADR-0011,
+# decision 4). Production keeps the package's `17/main` on 5432, so the drill
+# never touches the live cluster and the two have separate lifecycle units.
+# Backing up has to have happened at least once, which is why the backup unit is
+# ordered before this one but not required by it: a missing backup is a failure
+# the drill reports, not a reason to refuse to start.
+After=network-online.target postgresql@17-restore.service infra-cod-backup.service
+Wants=network-online.target postgresql@17-restore.service
+Requires=postgresql@17-restore.service
+
+PartOf=infra-cod.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/infra-cod/current
+Environment=INFRA_BACKUP_ROOT=/var/lib/infra-cod-backups
+Environment=INFRA_BACKUP_KEY=/etc/infra-cod/backup.passphrase
+Environment=INFRA_POSTGRES_BIN=/usr/lib/postgresql/17/bin
+Environment=INFRA_RESTORE_PGHOST=/var/run/postgresql
+Environment=INFRA_RESTORE_PGPORT=5433
+# The clients in the drill drop to the `infra-control` OS user, so its peer
+# mapping is the one every oneshot administration command uses: `infra_control`.
+# The same name is the owner of the throwaway database and its `extensions`
+# schema, and it exists only in the restore cluster — it is not a production role
+# and holds nothing in `17/main`. Stage 2 must create the role in `17/restore` and
+# map `infra-control` to it in pg_ident.conf; the full matrix is in
+# deploy/systemd/README.md.
+Environment=PGUSER=infra_control
+TimeoutStartSec=120
+ExecStart=/opt/node/bin/node /opt/infra-cod/current/services/operations/restore-drill.mjs
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/infra-cod-backups
+RestrictAddressFamilies=AF_UNIX
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_SETGID CAP_SETUID
+AmbientCapabilities=CAP_DAC_OVERRIDE CAP_SETGID CAP_SETUID
+LockPersonality=true
+MemoryDenyWriteExecute=false
+TasksMax=64
+MemoryMax=512M

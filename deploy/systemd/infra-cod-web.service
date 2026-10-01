@@ -1,0 +1,73 @@
+[Unit]
+Description=infra_cod control plane web UI (Next.js standalone)
+Documentation=file:/opt/infra-cod/current/docs/OPERATIONS.md
+# Caddy does not wait for readiness: it retries (`lb_try_duration`), so a panel
+# that is still booting becomes a slow first request instead of a 502.
+After=network-online.target postgresql@17-main.service
+Wants=network-online.target
+Wants=postgresql@17-main.service
+PartOf=infra-cod.target
+
+[Service]
+Type=simple
+# Its own OS user, mapped 1:1 to the `infra_web` role in pg_ident.conf. The panel
+# holds no DML on the authentication tables and reaches everything through the
+# SECURITY DEFINER surface, so this account is the narrowest of the DB clients.
+User=infra-web
+Group=infra-web
+
+WorkingDirectory=/opt/infra-cod/current/web
+
+# Listen on loopback only. Caddy is the sole publisher; a panel bound to 0.0.0.0
+# would be reachable directly on 3100 and would see requests whose Host it could
+# not trust.
+Environment=HOSTNAME=127.0.0.1
+Environment=PORT=3100
+Environment=NODE_ENV=production
+Environment=NEXT_TELEMETRY_DISABLED=1
+# The standalone server needs no package manager, no build cache and no network
+# at boot. Telemetry is off so it does not try, and nothing is written into the
+# release tree - which is why this unit declares no writable release path.
+
+# Connection target shared by every DB client, then this unit's own role. PGUSER
+# is set here and not in the shared file: web, worker and backup are different
+# roles, and a shared PGUSER would silently give all of them one.
+EnvironmentFile=-/etc/infra-cod/database.env
+Environment=PGUSER=infra_web
+
+# The panel's public origin and its secrets. Root-owned and readable by infra-web
+# only, so a worker or a runtime agent user cannot read the pepper that keys every
+# stored password hash.
+EnvironmentFile=/etc/infra-cod/web.env
+
+ExecStart=/opt/node/bin/node /opt/infra-cod/current/web/apps/web/server.js
+
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=20
+KillSignal=SIGTERM
+KillMode=mixed
+UMask=0027
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+MemoryDenyWriteExecute=false
+TasksMax=128
+MemoryMax=512M
+
+# The only writable locations, and both are outside the release on purpose: an
+# in-place upgrade and a rollback are a directory swap, not a cleanup problem.
+StateDirectory=infra-web
+StateDirectoryMode=0700
+CacheDirectory=infra-web
+CacheDirectoryMode=0700
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,744 @@
+[
+  {
+    "name": "color.canvas",
+    "figma": "bg/canvas",
+    "cssVar": "--color-canvas",
+    "type": "color",
+    "light": "#f4f3ef",
+    "dark": "#171717",
+    "description": "Page ground and card fill."
+  },
+  {
+    "name": "color.wash",
+    "figma": "bg/wash",
+    "cssVar": "--color-wash",
+    "type": "color",
+    "light": "rgba(17, 17, 17, 0.06)",
+    "dark": "rgba(244, 243, 239, 0.08)",
+    "description": "Hover fill for rows, menu items and nav."
+  },
+  {
+    "name": "color.skeleton",
+    "figma": "bg/skeleton",
+    "cssVar": "--color-skeleton",
+    "type": "color",
+    "light": "rgba(17, 17, 17, 0.07)",
+    "dark": "rgba(244, 243, 239, 0.10)",
+    "description": "Loading placeholders."
+  },
+  {
+    "name": "color.overlay",
+    "figma": "bg/overlay",
+    "cssVar": "--color-overlay",
+    "type": "color",
+    "light": "rgba(17, 17, 17, 0.40)",
+    "dark": "rgba(0, 0, 0, 0.60)",
+    "description": "Scrim behind dialogs and slide-overs."
+  },
+  {
+    "name": "color.inverse",
+    "figma": "bg/inverse",
+    "cssVar": "--color-inverse",
+    "type": "color",
+    "light": "#171717",
+    "dark": "#f4f3ef",
+    "description": "Inverted surface (footer, dark section)."
+  },
+  {
+    "name": "color.ink",
+    "figma": "fg/ink",
+    "cssVar": "--color-ink",
+    "type": "color",
+    "light": "#111111",
+    "dark": "#f4f3ef",
+    "description": "Primary text, primary button fill, active nav fill."
+  },
+  {
+    "name": "color.muted",
+    "figma": "fg/muted",
+    "cssVar": "--color-muted",
+    "type": "color",
+    "light": "#666666",
+    "dark": "#a3a29e",
+    "description": "Secondary text, hints, meta."
+  },
+  {
+    "name": "color.on-ink",
+    "figma": "fg/on-ink",
+    "cssVar": "--color-on-ink",
+    "type": "color",
+    "light": "#f4f3ef",
+    "dark": "#111111",
+    "description": "Text placed on an ink fill."
+  },
+  {
+    "name": "color.accent",
+    "figma": "accent/fill",
+    "cssVar": "--color-accent",
+    "type": "color",
+    "light": "#c8ff3d",
+    "dark": "#c8ff3d",
+    "description": "Brand accent fill: hover of primary, attention badge, selection, centre node of the mark."
+  },
+  {
+    "name": "color.on-accent",
+    "figma": "accent/on-accent",
+    "cssVar": "--color-on-accent",
+    "type": "color",
+    "light": "#111111",
+    "dark": "#111111",
+    "description": "Text on the accent fill. Always ink."
+  },
+  {
+    "name": "color.accent-text",
+    "figma": "accent/text",
+    "cssVar": "--color-accent-text",
+    "type": "color",
+    "light": "#111111",
+    "dark": "#c8ff3d",
+    "description": "Accent used as a text colour — only legible on dark, so it falls back to ink on paper."
+  },
+  {
+    "name": "color.line",
+    "figma": "border/line",
+    "cssVar": "--color-line",
+    "type": "color",
+    "light": "rgba(17, 17, 17, 0.12)",
+    "dark": "rgba(244, 243, 239, 0.16)",
+    "description": "Hairline borders and rules."
+  },
+  {
+    "name": "color.line-strong",
+    "figma": "border/line-strong",
+    "cssVar": "--color-line-strong",
+    "type": "color",
+    "light": "rgba(17, 17, 17, 0.24)",
+    "dark": "rgba(244, 243, 239, 0.40)",
+    "description": "Input borders, secondary button, dashed empty states."
+  },
+  {
+    "name": "color.focus",
+    "figma": "border/focus",
+    "cssVar": "--color-focus",
+    "type": "color",
+    "light": "#111111",
+    "dark": "#c8ff3d",
+    "description": "Focus ring."
+  },
+  {
+    "name": "color.success",
+    "figma": "status/success",
+    "cssVar": "--color-success",
+    "type": "color",
+    "light": "#2d6a3e",
+    "dark": "#8fd19e",
+    "description": "Success text/icon. Always paired with a text label."
+  },
+  {
+    "name": "color.success-soft",
+    "figma": "status/success-soft",
+    "cssVar": "--color-success-soft",
+    "type": "color",
+    "light": "#dfe8d8",
+    "dark": "#28312a",
+    "description": ""
+  },
+  {
+    "name": "color.warning",
+    "figma": "status/warning",
+    "cssVar": "--color-warning",
+    "type": "color",
+    "light": "#8a5300",
+    "dark": "#f0c36b",
+    "description": ""
+  },
+  {
+    "name": "color.warning-soft",
+    "figma": "status/warning-soft",
+    "cssVar": "--color-warning-soft",
+    "type": "color",
+    "light": "#f2e3c2",
+    "dark": "#352f23",
+    "description": ""
+  },
+  {
+    "name": "color.danger",
+    "figma": "status/danger",
+    "cssVar": "--color-danger",
+    "type": "color",
+    "light": "#a3301e",
+    "dark": "#f29a86",
+    "description": ""
+  },
+  {
+    "name": "color.danger-soft",
+    "figma": "status/danger-soft",
+    "cssVar": "--color-danger-soft",
+    "type": "color",
+    "light": "#f3dad3",
+    "dark": "#362926",
+    "description": ""
+  },
+  {
+    "name": "color.info",
+    "figma": "status/info",
+    "cssVar": "--color-info",
+    "type": "color",
+    "light": "#2e4d78",
+    "dark": "#9db8e0",
+    "description": ""
+  },
+  {
+    "name": "color.info-soft",
+    "figma": "status/info-soft",
+    "cssVar": "--color-info-soft",
+    "type": "color",
+    "light": "#dce2ea",
+    "dark": "#2a2e33",
+    "description": ""
+  },
+  {
+    "name": "radius.xs",
+    "figma": "radius/xs",
+    "cssVar": "--radius-xs",
+    "type": "dimension",
+    "value": 6,
+    "description": "Skeleton bars, tiny marks."
+  },
+  {
+    "name": "radius.sm",
+    "figma": "radius/sm",
+    "cssVar": "--radius-sm",
+    "type": "dimension",
+    "value": 8,
+    "description": "Badges, chips, menu items."
+  },
+  {
+    "name": "radius.md",
+    "figma": "radius/md",
+    "cssVar": "--radius-md",
+    "type": "dimension",
+    "value": 10,
+    "description": "Buttons, inputs, nav items."
+  },
+  {
+    "name": "radius.lg",
+    "figma": "radius/lg",
+    "cssVar": "--radius-lg",
+    "type": "dimension",
+    "value": 14,
+    "description": "Cards, popovers, dialogs."
+  },
+  {
+    "name": "radius.full",
+    "figma": "radius/full",
+    "cssVar": "--radius-full",
+    "type": "dimension",
+    "value": 9999,
+    "description": ""
+  },
+  {
+    "name": "space.1",
+    "figma": "space/1",
+    "cssVar": "--space-1",
+    "type": "dimension",
+    "value": 4,
+    "description": ""
+  },
+  {
+    "name": "space.2",
+    "figma": "space/2",
+    "cssVar": "--space-2",
+    "type": "dimension",
+    "value": 8,
+    "description": ""
+  },
+  {
+    "name": "space.3",
+    "figma": "space/3",
+    "cssVar": "--space-3",
+    "type": "dimension",
+    "value": 12,
+    "description": ""
+  },
+  {
+    "name": "space.4",
+    "figma": "space/4",
+    "cssVar": "--space-4",
+    "type": "dimension",
+    "value": 16,
+    "description": ""
+  },
+  {
+    "name": "space.5",
+    "figma": "space/5",
+    "cssVar": "--space-5",
+    "type": "dimension",
+    "value": 20,
+    "description": ""
+  },
+  {
+    "name": "space.6",
+    "figma": "space/6",
+    "cssVar": "--space-6",
+    "type": "dimension",
+    "value": 24,
+    "description": ""
+  },
+  {
+    "name": "space.7",
+    "figma": "space/7",
+    "cssVar": "--space-7",
+    "type": "dimension",
+    "value": 28,
+    "description": ""
+  },
+  {
+    "name": "space.8",
+    "figma": "space/8",
+    "cssVar": "--space-8",
+    "type": "dimension",
+    "value": 32,
+    "description": ""
+  },
+  {
+    "name": "space.10",
+    "figma": "space/10",
+    "cssVar": "--space-10",
+    "type": "dimension",
+    "value": 40,
+    "description": ""
+  },
+  {
+    "name": "space.12",
+    "figma": "space/12",
+    "cssVar": "--space-12",
+    "type": "dimension",
+    "value": 48,
+    "description": ""
+  },
+  {
+    "name": "space.16",
+    "figma": "space/16",
+    "cssVar": "--space-16",
+    "type": "dimension",
+    "value": 64,
+    "description": ""
+  },
+  {
+    "name": "space.20",
+    "figma": "space/20",
+    "cssVar": "--space-20",
+    "type": "dimension",
+    "value": 80,
+    "description": ""
+  },
+  {
+    "name": "space.0-5",
+    "figma": "space/0-5",
+    "cssVar": "--space-0-5",
+    "type": "dimension",
+    "value": 2,
+    "description": ""
+  },
+  {
+    "name": "space.1-5",
+    "figma": "space/1-5",
+    "cssVar": "--space-1-5",
+    "type": "dimension",
+    "value": 6,
+    "description": ""
+  },
+  {
+    "name": "space.2-5",
+    "figma": "space/2-5",
+    "cssVar": "--space-2-5",
+    "type": "dimension",
+    "value": 10,
+    "description": ""
+  },
+  {
+    "name": "space.3-5",
+    "figma": "space/3-5",
+    "cssVar": "--space-3-5",
+    "type": "dimension",
+    "value": 14,
+    "description": ""
+  },
+  {
+    "name": "space.section",
+    "figma": "space/section",
+    "cssVar": "--space-section",
+    "type": "dimension",
+    "value": 120,
+    "description": "Vertical rhythm between marketing sections."
+  },
+  {
+    "name": "size.control-sm",
+    "figma": "size/control-sm",
+    "cssVar": "--size-control-sm",
+    "type": "dimension",
+    "value": 36,
+    "description": "App buttons and inputs, compact."
+  },
+  {
+    "name": "size.control-md",
+    "figma": "size/control-md",
+    "cssVar": "--size-control-md",
+    "type": "dimension",
+    "value": 40,
+    "description": "App buttons and inputs, default."
+  },
+  {
+    "name": "size.control-lg",
+    "figma": "size/control-lg",
+    "cssVar": "--size-control-lg",
+    "type": "dimension",
+    "value": 48,
+    "description": "Marketing header CTA (was site `md`)."
+  },
+  {
+    "name": "size.control-xl",
+    "figma": "size/control-xl",
+    "cssVar": "--size-control-xl",
+    "type": "dimension",
+    "value": 56,
+    "description": "Marketing hero CTA (was site `lg`)."
+  },
+  {
+    "name": "size.container",
+    "figma": "size/container",
+    "cssVar": "--size-container",
+    "type": "dimension",
+    "value": 1280,
+    "description": "Marketing content column."
+  },
+  {
+    "name": "size.container-app",
+    "figma": "size/container-app",
+    "cssVar": "--size-container-app",
+    "type": "dimension",
+    "value": 1440,
+    "description": "Application main column."
+  },
+  {
+    "name": "size.sidebar",
+    "figma": "size/sidebar",
+    "cssVar": "--size-sidebar",
+    "type": "dimension",
+    "value": 240,
+    "description": ""
+  },
+  {
+    "name": "size.topbar",
+    "figma": "size/topbar",
+    "cssVar": "--size-topbar",
+    "type": "dimension",
+    "value": 60,
+    "description": "Application top bar."
+  },
+  {
+    "name": "size.header",
+    "figma": "size/header",
+    "cssVar": "--size-header",
+    "type": "dimension",
+    "value": 72,
+    "description": "Marketing header."
+  },
+  {
+    "name": "font.family.sans",
+    "figma": "family/sans",
+    "cssVar": "--font-sans",
+    "type": "fontFamily",
+    "value": "Inter",
+    "description": "Body, UI, forms."
+  },
+  {
+    "name": "font.family.display",
+    "figma": "family/display",
+    "cssVar": "--font-display",
+    "type": "fontFamily",
+    "value": "Space Grotesk",
+    "description": "Headings, wordmark."
+  },
+  {
+    "name": "font.family.mono",
+    "figma": "family/mono",
+    "cssVar": "--font-mono",
+    "type": "fontFamily",
+    "value": "JetBrains Mono",
+    "description": "Machine text: identifiers, logs, JSON, code, token counts. Loaded only on pages that render it."
+  },
+  {
+    "name": "type.marketing.h1",
+    "figma": "Marketing/h1",
+    "cssVar": ".type-h1",
+    "type": "typography",
+    "value": {
+      "family": "display",
+      "weight": 500,
+      "size": 76,
+      "min": 44,
+      "fluid": "clamp(2.75rem, 1.55rem + 4vw, 4.75rem)",
+      "lineHeight": 0.98,
+      "tracking": -0.03
+    },
+    "description": ""
+  },
+  {
+    "name": "type.marketing.h2",
+    "figma": "Marketing/h2",
+    "cssVar": ".type-h2",
+    "type": "typography",
+    "value": {
+      "family": "display",
+      "weight": 500,
+      "size": 64,
+      "min": 36,
+      "fluid": "clamp(2.25rem, 1.55rem + 2.4vw, 4rem)",
+      "lineHeight": 0.98,
+      "tracking": -0.03
+    },
+    "description": ""
+  },
+  {
+    "name": "type.marketing.h3",
+    "figma": "Marketing/h3",
+    "cssVar": ".type-h3",
+    "type": "typography",
+    "value": {
+      "family": "display",
+      "weight": 500,
+      "size": 36,
+      "min": 24,
+      "fluid": "clamp(1.5rem, 1.25rem + 1vw, 2.25rem)",
+      "lineHeight": 0.98,
+      "tracking": -0.03
+    },
+    "description": ""
+  },
+  {
+    "name": "type.marketing.body-lg",
+    "figma": "Marketing/body-lg",
+    "cssVar": ".type-body-lg",
+    "type": "typography",
+    "value": {
+      "family": "sans",
+      "weight": 400,
+      "size": 24,
+      "min": 18,
+      "fluid": "clamp(1.125rem, 1rem + 0.6vw, 1.5rem)",
+      "lineHeight": 1.45,
+      "tracking": 0
+    },
+    "description": ""
+  },
+  {
+    "name": "type.marketing.body",
+    "figma": "Marketing/body",
+    "cssVar": ".type-body",
+    "type": "typography",
+    "value": {
+      "family": "sans",
+      "weight": 400,
+      "size": 18,
+      "min": 16,
+      "fluid": "clamp(1rem, 0.96rem + 0.2vw, 1.125rem)",
+      "lineHeight": 1.6,
+      "tracking": 0
+    },
+    "description": ""
+  },
+  {
+    "name": "type.marketing.small",
+    "figma": "Marketing/small",
+    "cssVar": ".type-small",
+    "type": "typography",
+    "value": {
+      "family": "sans",
+      "weight": 400,
+      "size": 13,
+      "lineHeight": 1.5,
+      "tracking": 0
+    },
+    "description": ""
+  },
+  {
+    "name": "type.app.page-title",
+    "figma": "App/page-title",
+    "cssVar": ".type-page-title",
+    "type": "typography",
+    "value": {
+      "family": "display",
+      "weight": 500,
+      "size": 40,
+      "min": 32,
+      "lineHeight": 1.1,
+      "tracking": -0.025
+    },
+    "description": ""
+  },
+  {
+    "name": "type.app.section-title",
+    "figma": "App/section-title",
+    "cssVar": ".type-section-title",
+    "type": "typography",
+    "value": {
+      "family": "display",
+      "weight": 500,
+      "size": 22,
+      "lineHeight": 1.2,
+      "tracking": -0.025
+    },
+    "description": ""
+  },
+  {
+    "name": "type.app.card-title",
+    "figma": "App/card-title",
+    "cssVar": ".type-card-title",
+    "type": "typography",
+    "value": {
+      "family": "display",
+      "weight": 500,
+      "size": 16,
+      "lineHeight": 1.35,
+      "tracking": -0.025
+    },
+    "description": ""
+  },
+  {
+    "name": "type.app.body",
+    "figma": "App/body",
+    "cssVar": ".type-app-body",
+    "type": "typography",
+    "value": {
+      "family": "sans",
+      "weight": 400,
+      "size": 15,
+      "lineHeight": 1.5,
+      "tracking": 0
+    },
+    "description": ""
+  },
+  {
+    "name": "type.app.meta",
+    "figma": "App/meta",
+    "cssVar": ".type-meta",
+    "type": "typography",
+    "value": {
+      "family": "sans",
+      "weight": 400,
+      "size": 13,
+      "lineHeight": 1.45,
+      "tracking": 0,
+      "numeric": "tabular-nums"
+    },
+    "description": ""
+  },
+  {
+    "name": "type.app.id",
+    "figma": "App/id",
+    "cssVar": ".type-id",
+    "type": "typography",
+    "value": {
+      "family": "mono",
+      "weight": 400,
+      "size": 13,
+      "lineHeight": 1.45,
+      "tracking": 0,
+      "numeric": "tabular-nums"
+    },
+    "description": ""
+  },
+  {
+    "name": "type.mono.body",
+    "figma": "Mono/body",
+    "cssVar": ".type-mono-body",
+    "type": "typography",
+    "value": {
+      "family": "mono",
+      "weight": 400,
+      "size": 13,
+      "lineHeight": 1.55,
+      "tracking": 0,
+      "$description": "Log lines, prompts, tool arguments"
+    },
+    "description": "Log lines, prompts, tool arguments"
+  },
+  {
+    "name": "type.mono.small",
+    "figma": "Mono/small",
+    "cssVar": ".type-mono-small",
+    "type": "typography",
+    "value": {
+      "family": "mono",
+      "weight": 400,
+      "size": 12,
+      "lineHeight": 1.5,
+      "tracking": 0,
+      "$description": "Dense metadata: timestamps, counts"
+    },
+    "description": "Dense metadata: timestamps, counts"
+  },
+  {
+    "name": "type.mono.id",
+    "figma": "Mono/id",
+    "cssVar": ".type-mono-id",
+    "type": "typography",
+    "value": {
+      "family": "mono",
+      "weight": 500,
+      "size": 13,
+      "lineHeight": 1.45,
+      "tracking": 0,
+      "numeric": "tabular-nums",
+      "$description": "Run and model identifiers, hashes"
+    },
+    "description": "Run and model identifiers, hashes"
+  },
+  {
+    "name": "type.mono.code",
+    "figma": "Mono/code",
+    "cssVar": ".type-mono-code",
+    "type": "typography",
+    "value": {
+      "family": "mono",
+      "weight": 400,
+      "size": 13,
+      "lineHeight": 1.6,
+      "tracking": 0,
+      "$description": "Code and JSON blocks"
+    },
+    "description": "Code and JSON blocks"
+  },
+  {
+    "name": "type.shared.eyebrow",
+    "figma": "Shared/eyebrow",
+    "cssVar": ".type-eyebrow",
+    "type": "typography",
+    "value": {
+      "family": "sans",
+      "weight": 500,
+      "size": 12,
+      "lineHeight": 1.4,
+      "tracking": 0.14,
+      "transform": "uppercase"
+    },
+    "description": ""
+  },
+  {
+    "name": "type.shared.label",
+    "figma": "Shared/label",
+    "cssVar": ".type-label",
+    "type": "typography",
+    "value": {
+      "family": "sans",
+      "weight": 500,
+      "size": 15,
+      "lineHeight": 1.4,
+      "tracking": 0,
+      "$description": "Buttons and nav items."
+    },
+    "description": "Buttons and nav items."
+  }
+]

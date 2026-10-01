@@ -1,0 +1,17 @@
+{
+  "product": "infra-cod",
+  "node": "24.20.0",
+  "pnpm": "11.9.0",
+  "next": "16.2.10",
+  "postgresqlMajor": 17,
+  "target": {
+    "os": "linux",
+    "arch": "x64",
+    "libc": "glibc"
+  },
+  "signing": {
+    "scheme": "minisign",
+    "publicKey": "release/keys/infra-cod-release.pub",
+    "keyId": "4475A8420D07A7CF"
+  }
+}

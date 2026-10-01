@@ -1,0 +1,40 @@
+[Unit]
+Description=infra_cod encrypted control-plane and workspace backup
+After=network-online.target postgresql@17-main.service
+Wants=network-online.target
+Wants=postgresql@17-main.service
+
+PartOf=infra-cod.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+Environment=CONTROL_PLANE_DB=infra_cod
+EnvironmentFile=-/etc/infra-cod/database.env
+# root reaches PostgreSQL as `infra_backup` through the peer map, and the dump
+# runs in this process rather than through `runuser -u infra-control`. That
+# matters: the peer map is 1:1 per OS user, so mapping `infra-control` to
+# `infra_backup` would have handed an unprivileged worker account the backup role.
+# See deploy/systemd/README.md.
+Environment=PGUSER=infra_backup
+WorkingDirectory=/opt/infra-cod/current
+Environment=INFRA_BACKUP_ROOT=/var/lib/infra-cod-backups
+Environment=INFRA_BACKUP_KEY=/etc/infra-cod/backup.passphrase
+Environment=INFRA_POSTGRES_BIN=/usr/lib/postgresql/17/bin
+TimeoutStartSec=120
+ExecStart=/opt/node/bin/node /opt/infra-cod/current/services/operations/backup.mjs
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+# read-only, not `true`: the filesystem archive reads the agent home directories,
+# which are on /home. The write paths are the backup root and nothing else.
+ProtectHome=read-only
+ReadWritePaths=/var/lib/infra-cod-backups
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_SETGID CAP_SETUID
+AmbientCapabilities=CAP_CHOWN CAP_DAC_OVERRIDE CAP_SETGID CAP_SETUID
+LockPersonality=true
+MemoryDenyWriteExecute=false
+TasksMax=64
+MemoryMax=512M

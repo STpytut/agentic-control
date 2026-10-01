@@ -1,0 +1,69 @@
+# infra_cod local / clean-room acceptance edge - no public DNS.
+#
+# Serves the panel on http://127.0.0.1:8080 (or on the address in
+# INFRA_COD_BIND), which is what a clean-room acceptance run needs when the host
+# has no public DNS name and no certificate can be issued. This is NOT a
+# production configuration and the standard install path never installs it.
+#
+# It is a separate file from `Caddyfile` rather than a branch inside it, because
+# the two modes differ in exactly the things that must not be guessed: whether
+# certificates are real, whether HSTS is set, and whether the scheme is https. A
+# single file switching on an environment variable makes "am I accepting locally
+# or serving the public?" unanswerable from the configuration alone.
+#
+# Required environment:
+#   INFRA_COD_HOST   interface to listen on; defaults to 127.0.0.1
+#   INFRA_COD_PORT   port to listen on; defaults to 8080
+#
+# The panel's INFRA_COD_SITE_URL must be the origin this file serves. It is http,
+# so the panel has to run with INFRA_COD_INSECURE_COOKIES=1 and NODE_ENV
+# development: the `__Host-` prefix requires Secure, and
+# `assertCookieConfiguration()` refuses to serve a production build with that flag
+# set. That is the honest local acceptance mode - it says nothing about the
+# production cookie configuration, which is what the standalone smoke test
+# exercises instead (production build, `__Host-` cookies, https origin).
+#
+# Validate:
+#   caddy fmt --diff deploy/caddy/Caddyfile.local
+#   caddy validate --config deploy/caddy/Caddyfile.local
+#   caddy run --config deploy/caddy/Caddyfile.local
+{
+	# No ACME account and no automatic HTTPS: there is no name to certify. This
+	# alone does not make the listener plain HTTP, though, and that is the trap
+	# this block is written around: an address written as `host:port` means "TLS on
+	# that port" to the Caddyfile adapter, which installs an empty
+	# `tls_connection_policies` entry regardless of `auto_https`. Every request
+	# then fails with `Client sent an HTTP request to an HTTPS server`. The site
+	# address below therefore carries an explicit `http://` scheme, which is what
+	# selects a plain-HTTP listener.
+	auto_https off
+}
+
+http://{$INFRA_COD_HOST:127.0.0.1}:{$INFRA_COD_PORT:8080} {
+	# No Strict-Transport-Security. This origin is plain HTTP; sending HSTS would
+	# assert that a scheme this listener cannot provide is stable, and a browser
+	# that believed it would refuse the http:// address entirely.
+
+	encode zstd gzip
+
+	request_body {
+		max_size {$INFRA_COD_MAX_BODY:5MB}
+	}
+
+	reverse_proxy 127.0.0.1:3100 {
+		lb_try_duration 5s
+		lb_try_interval 250ms
+
+		# As in the production file: Caddy sets the X-Forwarded-* headers itself
+		# and ignores incoming values for them, so none is re-stated here.
+	}
+
+	# As in the production file: Caddy redacts the credential-bearing headers by
+	# default, and `log_credentials` is never enabled.
+	log {
+		output file /var/log/caddy/infra-cod-local-access.log {
+			roll_size 10MiB
+			roll_keep 3
+		}
+	}
+}

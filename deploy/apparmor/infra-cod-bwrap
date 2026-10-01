@@ -1,0 +1,15 @@
+# infra-cod (Stage 12 R13): user namespaces for the distribution's bubblewrap
+# only. Codex after 0.154.0 sandboxes its commands with bubblewrap, which needs
+# an unprivileged user namespace; kernel.apparmor_restrict_unprivileged_userns
+# stays 1 for every other program on the host.
+#
+# The profile is named `bwrap`, the name the owner's hand-applied profile of
+# 2026-09-28 used, so loading this one replaces that one in the kernel rather
+# than attaching a second profile to the same binary.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+  include if exists <local/bwrap>
+}

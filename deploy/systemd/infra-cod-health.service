@@ -1,0 +1,53 @@
+[Unit]
+Description=infra_cod health, metrics and alert snapshot
+After=network-online.target postgresql@17-main.service infra-cod-dispatcher.service infra-cod-reconciler.service infra-cod-runtime-supervisor.service
+Wants=network-online.target
+Wants=postgresql@17-main.service
+
+PartOf=infra-cod.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+Environment=CONTROL_PLANE_DB=infra_cod
+EnvironmentFile=-/etc/infra-cod/database.env
+# This unit is root because it also retires /etc/infra-cod/initial-credentials,
+# which is a root-owned file operation. The database half does not need root, and
+# the role is stated explicitly so this unit does not inherit whatever the shared
+# file happens to name. infra_worker is the role that already holds EXECUTE on the
+# credential-status and retirement functions.
+Environment=PGUSER=infra_worker
+WorkingDirectory=/opt/infra-cod/current
+Environment=INFRA_BACKUP_ROOT=/var/lib/infra-cod-backups
+Environment=INFRA_OBSERVABILITY_ROOT=/var/lib/infra-control/observability
+TimeoutStartSec=120
+ExecStart=/opt/node/bin/node /opt/infra-cod/current/services/operations/health-snapshot.mjs
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+# read-only, not true, and for the same reason the backup unit says: this unit
+# has to be able to ask the agent runtimes what state they are in, and `true`
+# makes /home empty inside the namespace — so the snapshot died every minute with
+# "/home/codex-worker does not exist" the moment a runtime was installed, taking the
+# database, service and backup sections of the report down with it.
+#
+# Read-only is enough because nothing here writes into a runtime home: the
+# credential evidence is tested with `test -s`, and `codex login status` answers
+# from a read-only home (it warns that it could not create PATH aliases, and
+# still says whether there is an account).
+ProtectHome=read-only
+ReadWritePaths=/var/lib/infra-control/observability
+# This unit is also what retires /etc/infra-cod/initial-credentials once the
+# generated password in it is no longer anybody's way in. That has to happen as
+# root and outside the web tier, which must never be able to touch the file. The
+# leading `-` tolerates its absence on an installation that never wrote one.
+ReadWritePaths=-/etc/infra-cod
+ReadOnlyPaths=/var/lib/infra-cod-backups
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_SETGID CAP_SETUID
+AmbientCapabilities=CAP_DAC_OVERRIDE CAP_SETGID CAP_SETUID
+LockPersonality=true
+MemoryDenyWriteExecute=false
+TasksMax=64
+MemoryMax=256M

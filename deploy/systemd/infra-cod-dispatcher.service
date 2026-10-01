@@ -1,0 +1,34 @@
+[Unit]
+Description=infra_cod PostgreSQL outbox dispatcher
+After=network-online.target postgresql@17-main.service
+Wants=network-online.target
+Wants=postgresql@17-main.service
+
+PartOf=infra-cod.target
+
+[Service]
+Type=simple
+User=infra-control
+Group=infra-control
+WorkingDirectory=/var/lib/infra-control
+Environment=CONTROL_PLANE_DB=infra_cod
+EnvironmentFile=-/etc/infra-cod/database.env
+Environment=PGUSER=infra_worker
+Environment=DISPATCHER_ID=vps-dispatcher-1
+Environment=DISPATCHER_POLL_MS=15000
+ExecStart=/opt/node/bin/node /opt/infra-cod/current/services/control-plane/dispatcher.mjs
+Restart=on-failure
+TimeoutStopSec=20
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+MemoryDenyWriteExecute=false
+TasksMax=64
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

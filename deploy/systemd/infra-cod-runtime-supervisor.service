@@ -1,0 +1,103 @@
+[Unit]
+Description=infra_cod privileged runtime supervisor
+After=network-online.target postgresql@17-main.service
+Wants=network-online.target
+Wants=postgresql@17-main.service
+
+PartOf=infra-cod.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+RuntimeDirectory=infra-cod
+RuntimeDirectoryMode=0755
+WorkingDirectory=/opt/infra-cod/current
+Environment=CONTROL_PLANE_DB=infra_cod
+EnvironmentFile=-/etc/infra-cod/database.env
+Environment=PGUSER=infra_worker
+Environment=RUNTIME_SUPERVISOR_ID=vps-runtime-supervisor-1
+Environment=WORKSPACE_OPERATION_POLL_MS=60000
+# How long an implementation run may take. Both this unit and the executor
+# worker read it: the supervisor enforces it and the worker waits it out plus a
+# margin, so whoever changes it has to change it in both places or the two drift
+# into the failure they were separated by — the worker giving up on a run that is
+# still writing to the workspace.
+Environment=RUNTIME_RUN_TIMEOUT_MS=3600000
+Environment=RUNTIME_SUPERVISOR_SOCKET=/run/infra-cod/runtime-supervisor.sock
+Environment=RUNTIME_SUPERVISOR_SOCKET_GROUP=infra-control
+# One worker tool socket per run under this root, owned by the run's runtime
+# account (WP-9b). It replaced one socket shared by the opencode-worker group.
+Environment=WORKER_TOOL_SOCKET_ROOT=/run/infra-cod/worker-tools
+Environment=GITHUB_BROKER_SUPERVISOR_SOCKET=/run/infra-cod/github-workspace-broker.sock
+Environment=GITHUB_BROKER_SUPERVISOR_SOCKET_GROUP=infra-cod-github
+Environment=PROJECT_WORKSPACE_ROOT=/srv/infra-cod/workspaces
+Environment=RUNTIME_GATE_WORKSPACE_ROOT=/srv/infra-cod/gate-smoke
+ExecStart=/opt/node/bin/node /opt/infra-cod/current/services/runtime-supervisor/server.mjs
+Restart=on-failure
+TimeoutStopSec=20
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/srv/infra-cod/workspaces
+ReadWritePaths=/srv/infra-cod/gate-smoke
+ReadWritePaths=/home/codex-worker/.codex
+ReadWritePaths=/home/opencode-worker/.local
+# Claude Code's login and sessions, and its account file beside them (sprint C
+# K2); tmpfiles makes both, so the namespace always finds them.
+ReadWritePaths=/home/claude-worker/.claude
+ReadWritePaths=/home/claude-worker/.claude.json
+# OpenCode writes into its own config directory while booting — a `.gitignore`,
+# from `Config.loadInstanceState` on the path to `Server.listen`. Without this the
+# server dies before it listens, the supervisor waits out its 30-second deadline,
+# and the panel says "OpenCode account server startup timed out:" with nothing
+# after the colon, because the process never wrote to stderr. The reason was only
+# ever in OpenCode's own log:
+#
+#   EROFS: read-only file system, open '/home/opencode-worker/.config/opencode/.gitignore'
+#
+# `.local` was granted because that is where the credential store lives; this is
+# the other half of the same home, and the runtime owns both.
+ReadWritePaths=/home/opencode-worker/.config/opencode
+# And the cache. A run launched in a workspace goes through the general launch
+# path, which sets HOME, PATH, PWD and LANG and no XDG variables, so OpenCode
+# caches models.dev under the default `~/.cache`. Read-only, the executor exits 1
+# with "Failed to fetch models.dev ... EROFS" — and the supervisor discards its
+# stdout, so what the operator saw was "OpenCode exited with code 1: " with
+# nothing after the colon.
+ReadWritePaths=/home/opencode-worker/.cache
+# Project-scoped deploy keys are removed by deprovision_project; the path is
+# strictly bounded to the configured key root (never /etc broadly).
+ReadWritePaths=/etc/infra-cod/github-deploy-keys
+# The runtime fence. Not under RuntimeDirectory on purpose: systemd deletes that
+# when this unit stops, and a lock on an unlinked inode excludes nobody.
+ReadWritePaths=/var/lib/infra-cod/runtime-fence
+ReadOnlyPaths=/home/opencode-worker/.config/opencode/tools
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+# CAP_FSETID is here for one operation and is not optional for it: the gate root
+# is mode 2771, and the setgid bit is what makes each per-verification scratch
+# directory inherit infra-control. Linux clears S_ISGID on chmod when the caller
+# lacks CAP_FSETID and the file's group is not one of its own — root included,
+# because this unit runs with a bounding set. Without it the supervisor's
+# `chmod(gateRoot, 0o2771)` silently landed as 0771, and every scratch directory
+# it created afterwards belonged to the wrong group.
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_FSETID CAP_KILL CAP_SETGID CAP_SETUID
+AmbientCapabilities=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_FSETID CAP_KILL CAP_SETGID CAP_SETUID
+LockPersonality=true
+MemoryDenyWriteExecute=false
+# The unit's cgroup subtree is the supervisor's to manage (sprint C, K1). It
+# starts every run in a cgroup of its own beneath this unit's and stops a run by
+# killing that cgroup, which reaches a tool that left the process group — the
+# Claude Code PoC showed `kill(-pgid)` leaving `bash` and `sleep` behind. Without
+# this line the subtree is systemd's, the supervisor cannot make a cgroup there,
+# and it refuses to start rather than launch a run it could not kill. The runs
+# stay inside this unit's cgroup, so TasksMax and MemoryMax bound them as before
+# and a stop of this unit still ends every one of them.
+Delegate=yes
+TasksMax=256
+MemoryMax=1G
+
+[Install]
+WantedBy=multi-user.target

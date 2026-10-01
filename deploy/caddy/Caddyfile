@@ -1,0 +1,94 @@
+# infra_cod production edge - public domain mode.
+#
+# Caddy is the only thing exposed to the internet. The panel listens on
+# 127.0.0.1:3100 and is never published; see docs/OPERATIONS.md for the firewall
+# rules and deploy/systemd/infra-cod-caddy.service for how this file is started.
+#
+# This file is the *public* mode: a real DNS name, ACME certificates and an
+# HTTP-to-HTTPS redirect. For an acceptance run with no public DNS use
+# Caddyfile.local instead. They are separate files on purpose: which mode an
+# installation is in must be answerable by looking at the file Caddy loaded, not
+# by inspecting an environment variable that may or may not have been set.
+#
+# Required environment (from /etc/infra-cod/caddy.env, mode 0640 root:root):
+#   INFRA_COD_DOMAIN      the DNS name the panel is served from
+#   INFRA_COD_ACME_EMAIL  contact address for the ACME account
+#
+# Separately, the panel's own unit sets INFRA_COD_SITE_URL to
+# https://<INFRA_COD_DOMAIN>. The two must agree: the panel refuses to start when
+# its origin is missing or not https, and a mismatch turns every mutating request
+# into a CSRF failure rather than a silent redirect to the wrong host.
+#
+# Validate before reloading:
+#   caddy fmt --diff /etc/infra-cod/caddy/Caddyfile
+#   caddy validate --config /etc/infra-cod/caddy/Caddyfile
+#   systemctl reload infra-cod-caddy.service
+{
+	email {$INFRA_COD_ACME_EMAIL}
+}
+
+{$INFRA_COD_DOMAIN} {
+	# Compression is Caddy's job for the whole site; Next is built with
+	# `compress: false` because it sees only the proxied response and cannot know
+	# the client's Accept-Encoding.
+	encode zstd gzip
+
+	# HSTS lives here and not in the application. Only Caddy knows that a real
+	# certificate was issued and that the HTTPS endpoint is stable; the browser
+	# headers that are true regardless of transport (X-Content-Type-Options,
+	# Referrer-Policy, X-Frame-Options, Cross-Origin-Opener-Policy) are set in
+	# `apps/web/src/proxy.ts` and are deliberately not duplicated here.
+	#
+	# This block *is* the HTTPS site, so every response through it was already
+	# over TLS. Caddyfile.local deliberately sets no HSTS at all.
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+	# 5 MiB is the largest body the panel accepts. The composer caps a message at
+	# 64,000 characters with up to three 48 KB attachments inside that same limit,
+	# and the action route reads a form body; the bound leaves room for a
+	# multipart envelope without letting an unauthenticated caller allocate
+	# arbitrarily. Raise it through INFRA_COD_MAX_BODY if a real upload contract
+	# arrives.
+	request_body {
+		max_size {$INFRA_COD_MAX_BODY:5MB}
+	}
+
+	reverse_proxy 127.0.0.1:3100 {
+		# The panel is a separate unit and may be restarting when Caddy is already
+		# up. Retrying briefly turns that into a slow response instead of a 502 the
+		# operator has to reload past.
+		lb_try_duration 5s
+		lb_try_interval 250ms
+
+		# No `header_up` for the forwarded headers, and that is the point.
+		# Caddy sets `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host`
+		# itself and, unless a `trusted_proxies` range says otherwise, ignores the
+		# values an incoming request supplied for them. So a request that arrives
+		# claiming `X-Forwarded-For: 10.0.0.1` cannot choose the address the panel
+		# records and rate-limits by, and there is nothing to re-state here. No
+		# `trusted_proxies` is configured anywhere either: the panel's only hop is
+		# the loopback connection Caddy itself made.
+	}
+
+	# Access logging to a size-bounded file. No credential filter is configured
+	# because Caddy already writes `Cookie`, `Set-Cookie`, `Authorization` and
+	# `Proxy-Authorization` as `REDACTED` unless the global `log_credentials`
+	# option turns that off - and this file never sets it, so the safe behaviour
+	# is the one in effect. What does reach the log is a credential-free request
+	# line, which is what makes the file useful for diagnosing a failed sign-in
+	# without being a way in.
+	log {
+		output file /var/log/caddy/infra-cod-access.log {
+			roll_size 50MiB
+			roll_keep 10
+		}
+	}
+}
+
+# HTTP is only ever a redirect to HTTPS. It is its own site block rather than an
+# automatic redirect because the ACME HTTP-01 challenge is answered on port 80
+# before this handler, which is what lets a fresh installation obtain its first
+# certificate.
+http://{$INFRA_COD_DOMAIN} {
+	redir https://{host}{uri} permanent
+}

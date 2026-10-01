@@ -1,0 +1,50 @@
+[Unit]
+Description=infra_cod GitHub App credential broker and github_app project provisioner
+After=network-online.target postgresql@17-main.service infra-cod-runtime-supervisor.service
+Wants=network-online.target
+Wants=postgresql@17-main.service
+
+PartOf=infra-cod.target
+
+[Service]
+Type=simple
+User=infra-cod-github
+Group=infra-cod-github
+SupplementaryGroups=agent-workspace
+WorkingDirectory=/opt/infra-cod/current
+Environment=HOME=/var/lib/infra-cod-github
+Environment=CONTROL_PLANE_DB=infra_cod
+Environment=PROJECT_WORKSPACE_ROOT=/srv/infra-cod/workspaces
+Environment=GITHUB_APP_WORKER_ID=github-app-broker-1
+Environment=GITHUB_BROKER_SUPERVISOR_SOCKET=/run/infra-cod/github-workspace-broker.sock
+Environment=GITHUB_APP_WORKER_POLL_MS=60000
+Environment=GITHUB_APP_PRIVATE_KEY_PATH=/etc/infra-cod/github-app/private-key.pem
+# An App the settings page creates (Stage 12 G1) keeps its private key and
+# client secret here, readable by this user alone.
+Environment=GITHUB_APP_STATE_DIR=/var/lib/infra-cod-github/app
+EnvironmentFile=-/etc/infra-cod/database.env
+Environment=PGUSER=infra_worker
+EnvironmentFile=-/etc/infra-cod/github-app.env
+ExecStart=/opt/node/bin/node /opt/infra-cod/current/services/control-plane/github-app-worker.mjs
+Restart=on-failure
+TimeoutStopSec=20
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+MemoryDenyWriteExecute=false
+TasksMax=64
+MemoryMax=256M
+ReadWritePaths=/srv/infra-cod/workspaces
+ReadOnlyPaths=/etc/infra-cod/github-app
+StateDirectory=infra-cod-github
+StateDirectoryMode=0700
+
+[Install]
+WantedBy=multi-user.target

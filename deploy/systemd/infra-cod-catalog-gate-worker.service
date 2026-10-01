@@ -1,0 +1,39 @@
+[Unit]
+Description=infra_cod model check lane (one short turn per model check; LISTEN model_checks)
+After=network-online.target postgresql@17-main.service infra-cod-runtime-supervisor.service
+Wants=network-online.target
+Wants=postgresql@17-main.service infra-cod-runtime-supervisor.service
+
+PartOf=infra-cod.target
+
+[Service]
+Type=simple
+User=infra-control
+Group=infra-control
+WorkingDirectory=/opt/infra-cod/current
+Environment=CONTROL_PLANE_DB=infra_cod
+EnvironmentFile=-/etc/infra-cod/database.env
+Environment=PGUSER=infra_worker
+Environment=RUNTIME_SUPERVISOR_SOCKET=/run/infra-cod/runtime-supervisor.sock
+Environment=RUNTIME_GATE_WORKSPACE_ROOT=/srv/infra-cod/gate-smoke
+Environment=CATALOG_GATE_WORKER_ID=vps-catalog-gate-worker-1
+# Woken by NOTIFY model_checks; the poll is the fallback and the moment the
+# automatic checks that are due are asked for (Stage 12 W6).
+Environment=CATALOG_GATE_POLL_MS=60000
+ExecStart=/opt/node/bin/node /opt/infra-cod/current/services/control-plane/catalog-gate-worker.mjs
+Restart=on-failure
+TimeoutStopSec=20
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/infra-cod/gate-smoke
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+MemoryDenyWriteExecute=false
+TasksMax=32
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

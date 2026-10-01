@@ -1,0 +1,508 @@
+# Installer acceptance for infra-cod on Ubuntu 24.04 x86-64.
+#
+# Builds an unsigned candidate artifact, signs its SHA256SUMS with an ephemeral
+# minisign key, then runs the real installer on the runner itself: no Docker and
+# no PostgreSQL service container. The runner image is NOT a clean host — it ships
+# PostgreSQL 16 with a `16/main` cluster on 5432, stopped — so the job removes it
+# first and asserts that no cluster remains. The installer must not be softened to
+# tolerate it: `setup-postgresql-production.sh` refusing a foreign cluster on the
+# production port is correct behaviour on a real VPS.
+# The installer brings up PostgreSQL 17 from PGDG,
+# systemd units, Caddy and the panel, and the job then exercises the panel the way
+# a browser does — a form POST through Caddy over HTTPS, with the pre-auth CSRF
+# cookie and token the login page issues.
+#
+# Why the build is not `--publish`: a publish build requires a v* tag at HEAD, a
+# matching --version and a clean tree. A CI branch run has none of the three, and
+# the builder refuses all three deliberately. The signature the installer's trust
+# chain needs is therefore produced here, over the checksum file, exactly as the
+# release job would.
+
+name: installer-acceptance
+
+# One run per change: branches are checked on their pull request, and `push`
+# only where no pull request exists to do it. See release.yml for the reasoning.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "24.20.0"
+  PNPM_VERSION: "11.9.0"
+  NEXT_TELEMETRY_DISABLED: "1"
+  INFRA_COD_DOMAIN: "ci-infra-cod.localhost"
+
+jobs:
+  scope:
+    name: what changed
+    uses: ./.github/workflows/scope.yml
+
+  # A two-minute gate for the class of defect that cost three full acceptance
+  # runs: unit files that systemd refuses, and sandbox paths that do not exist.
+  #
+  # It installs the accounts, the tmpfiles and the units straight from the
+  # repository — no build, no release, no database — and asks systemd to parse
+  # and to materialise them. It cannot start the services (they need Node and a
+  # release), so it is a gate, not a substitute for the acceptance job below.
+  units:
+    name: unit and sandbox gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Create the accounts the units run as
+        run: |
+          set -euo pipefail
+          for g in infra-web infra-control infra-cod-github agent-workspace opencode-worker caddy codex-poc; do
+            getent group "${g}" >/dev/null || sudo groupadd --system "${g}"
+          done
+          for u in infra-web infra-control infra-cod-github caddy; do
+            getent passwd "${u}" >/dev/null || sudo useradd --system --gid "${u}" \
+              --home-dir "/var/lib/${u}" --shell /usr/sbin/nologin "${u}"
+          done
+          for u in codex-poc opencode-worker; do
+            getent passwd "${u}" >/dev/null || sudo useradd --system --gid "${u}" \
+              --create-home --shell /usr/sbin/nologin "${u}"
+          done
+
+      - name: Install tmpfiles and materialise the paths
+        run: |
+          set -euo pipefail
+          sudo install -o root -g root -m 0644 deploy/tmpfiles.d/*.conf /etc/tmpfiles.d/
+          # Verbose, and its output kept: a silent tmpfiles run that creates two
+          # of three directories is exactly the kind of thing this gate exists to
+          # make visible rather than to infer.
+          sudo systemd-tmpfiles --create 2>&1 | tee "${RUNNER_TEMP}/tmpfiles.log" || true
+          echo "::group::what tmpfiles did"
+          cat "${RUNNER_TEMP}/tmpfiles.log"
+          sudo ls -laR /home/opencode-worker /home/codex-poc || true
+          echo "::endgroup::"
+          # The paths the runtime supervisor names in ReadWritePaths and
+          # ReadOnlyPaths. systemd resolves these while building the unit's mount
+          # namespace, before ExecStart: a missing one is 226/NAMESPACE, not a
+          # warning, and that is what stopped the supervisor on a clean install.
+          # Under sudo, because these live inside 0700 directories owned by the
+          # runtime users: an unprivileged `test -d` on a path it cannot traverse
+          # answers "no", which is not the same fact as "it is missing".
+          for path in /home/codex-poc/.codex /home/opencode-worker/.local \
+              /home/opencode-worker/.config/opencode/tools \
+              /srv/infra-cod-handoff-poc/workspaces /srv/infra-cod-handoff-poc/gate-smoke \
+              /etc/infra-cod/github-deploy-keys /etc/infra-cod/github-app; do
+            sudo test -d "${path}" || { echo "::error::${path} was not created"; exit 1; }
+            sudo ls -ld "${path}"
+          done
+
+      - name: Every sandbox path a unit names exists
+        run: |
+          set -euo pipefail
+          : > "${RUNNER_TEMP}/sandbox-missing"
+          # A pipeline, not a heredoc: a heredoc terminator has to sit at column
+          # zero, which ends the YAML block scalar this step is written in. The
+          # loop therefore runs in a subshell, so the verdict goes to a file
+          # rather than to a variable the parent would never see.
+          for unit in deploy/systemd/*.service; do
+            # `|| true`: most units name no sandbox paths at all, and grep
+            # answering "no matches" with exit 1 under pipefail ended the step
+            # with no explanation at all.
+            { grep -hE '^(ReadWritePaths|ReadOnlyPaths)=' "${unit}" || true; } \
+              | sed 's/^[A-Za-z]*=//' | tr ' ' '\n' | while read -r p; do
+              [ -n "${p}" ] || continue
+              # A leading - marks the path optional by declaration.
+              case "${p}" in -*) continue ;; esac
+              case "${p}" in
+                /opt/infra-cod/*|/var/lib/infra-cod-backups*|/var/lib/infra-control*|/var/log/*) continue ;;
+              esac
+              if ! sudo test -e "${p}"; then
+                echo "::error::$(basename "${unit}") names ${p}, which does not exist"
+                echo "missing" >> "${RUNNER_TEMP}/sandbox-missing"
+              fi
+            done
+          done
+          if [ -s "${RUNNER_TEMP}/sandbox-missing" ]; then exit 1; fi
+          echo "every sandbox path a unit names exists"
+
+      # `systemd-analyze verify` resolves ExecStart, so the two binaries the
+      # units name have to exist. Stubbing them is what lets this gate check
+      # everything else about the units without a build; whether the real ones
+      # work is the acceptance job's question.
+      - name: Stand in for the pinned binaries
+        run: |
+          set -euo pipefail
+          for binary in $(grep -hE '^ExecStart' deploy/systemd/*.service \
+              | sed 's/^ExecStart[A-Za-z]*=//' | awk '{print $1}' | sort -u); do
+            sudo mkdir -p "$(dirname "${binary}")"
+            printf '#!/bin/sh\nexit 0\n' | sudo tee "${binary}" >/dev/null
+            sudo chmod 0755 "${binary}"
+            echo "stub: ${binary}"
+          done
+          # The units read their code through the current symlink; the checkout
+          # stands in for a release so every WorkingDirectory resolves.
+          sudo mkdir -p /opt/infra-cod
+          sudo ln -sfn "${GITHUB_WORKSPACE}" /opt/infra-cod/current
+
+      - name: systemd-analyze verify
+        run: |
+          set -euo pipefail
+          sudo install -o root -g root -m 0644 deploy/systemd/*.service deploy/systemd/*.timer \
+            deploy/systemd/*.target /etc/systemd/system/
+          sudo systemctl daemon-reload
+          for unit in /etc/systemd/system/infra-cod*; do
+            sudo systemd-analyze verify "${unit}"
+          done
+          echo "all units verified"
+
+  install:
+    name: acceptance on ubuntu-24.04
+    # The unit gate runs on every pull request, including drafts: it is ten
+    # minutes and it is the one that catches most mistakes. The two-hour
+    # end-to-end install waits until the change is both ready for review and
+    # actually touches something it could break.
+    if: >-
+      ${{ github.event.pull_request.draft != true
+        && needs.scope.outputs.code == 'true' }}
+    needs: [units, scope]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      # Only what the *build* needs. postgresql-client-17 is deliberately absent:
+      # it does not exist in Ubuntu 24.04's own archive, and installing it before
+      # the PGDG repository is configured is exactly the failure the installer
+      # handles itself.
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            ca-certificates curl gnupg minisign jq
+
+      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The sandboxed installer suite, before anything is installed for real. It
+      # needs no database and no privileges, and it is the suite that catches a
+      # broken installer in seconds instead of ninety minutes.
+      - name: Installer suite (sandboxed)
+        run: npm run test:installer
+
+      - name: Generate ephemeral minisign key
+        id: minisign
+        run: |
+          KEY_DIR="${RUNNER_TEMP}/minisign"
+          mkdir -p "${KEY_DIR}"
+          minisign -G -W -p "${KEY_DIR}/infra-cod-release.pub" -s "${KEY_DIR}/infra-cod-release.key"
+          echo "pub=${KEY_DIR}/infra-cod-release.pub" >> "${GITHUB_OUTPUT}"
+          echo "sec=${KEY_DIR}/infra-cod-release.key" >> "${GITHUB_OUTPUT}"
+
+      # Unsigned: a branch build is a development version, which the builder
+      # refuses to publish and which --publish would reject before it started.
+      - name: Build release artifact
+        run: |
+          npm run release:build -- \
+            --out dist/releases \
+            --work dist/release-work \
+            --sentinel INFRA_COD_SITE_URL=http://example.com \
+            --sentinel INFRA_COD_AUTH_PEPPER=test-pepper-do-not-use-in-prod \
+            --sentinel GITHUB_OAUTH_CODE_ENCRYPTION_KEY=ab123456789012345678901234567890123456789012345678901234567890cd
+
+      - name: Locate and sign the artifact
+        id: artifact
+        run: |
+          set -euo pipefail
+          ADIR=$(find dist/releases -maxdepth 3 -name SHA256SUMS -exec dirname {} \; | head -1)
+          [ -n "${ADIR}" ] || { echo "no SHA256SUMS produced"; exit 1; }
+          TARBALL=$(ls "${ADIR}"/*.tar.gz)
+          # The detached signature over the checksum file is what the shell gate
+          # and the deep verifier both check, and it is produced the same way the
+          # release job produces it.
+          minisign -S -m "${ADIR}/SHA256SUMS" -s "${{ steps.minisign.outputs.sec }}" \
+            -t "infra-cod ci acceptance $(git rev-parse --short HEAD)" </dev/null
+          {
+            echo "dir=${ADIR}"
+            echo "tarball=${TARBALL}"
+            echo "checksums=${ADIR}/SHA256SUMS"
+            echo "signature=${ADIR}/SHA256SUMS.minisig"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Pre-install shell gate (trusted deploy/ path)
+        run: |
+          sh deploy/verify-release.sh \
+            --artifact "${{ steps.artifact.outputs.tarball }}" \
+            --checksums "${{ steps.artifact.outputs.checksums }}" \
+            --signature "${{ steps.artifact.outputs.signature }}" \
+            --public-key "${{ steps.minisign.outputs.pub }}" \
+            --require-signature
+
+      # Caddy issues an internal certificate for a .localhost name, so the panel
+      # is reachable over the https origin it is configured with — which is what
+      # the `__Host-` cookies and the CSRF origin check require.
+      # The ubuntu-24.04 image ships PostgreSQL 16 and a `16/main` cluster on
+      # 5432. A production installer is right to refuse to move or replace a
+      # cluster it does not own, so the ephemeral runner is made clean instead.
+      - name: Remove the runner's preinstalled PostgreSQL
+        run: |
+          set -euo pipefail
+          sudo systemctl stop postgresql || true
+          if command -v pg_lsclusters >/dev/null 2>&1; then
+            pg_lsclusters --no-header || true
+            while read -r version cluster _rest; do
+              [ -n "${version:-}" ] || continue
+              sudo pg_dropcluster --stop "${version}" "${cluster}"
+            done < <(pg_lsclusters --no-header)
+          fi
+          sudo DEBIAN_FRONTEND=noninteractive apt-get purge -y 'postgresql-16*' 'postgresql-client-16*' || true
+          sudo DEBIAN_FRONTEND=noninteractive apt-get autoremove -y || true
+          sudo rm -rf /var/lib/postgresql/16 /etc/postgresql/16
+          # The precondition the installer is entitled to assume. `pg_lsclusters`
+          # is itself removed with postgresql-common, and that is a clean state,
+          # not an unknown one.
+          if command -v pg_lsclusters >/dev/null 2>&1; then
+            REMAINING=$(pg_lsclusters --no-header | grep -c . || true)
+            [ "${REMAINING}" = "0" ] || { echo "clusters remain:"; pg_lsclusters; exit 1; }
+          fi
+          # -H, because ss prints a column header even when nothing matches; the
+          # first run of this workflow failed here on an idle port for that reason.
+          HOLDERS=$(sudo ss -H -tlnp 'sport = :5432' | grep -c . || true)
+          [ "${HOLDERS}" = "0" ] || { echo "5432 is still held:"; sudo ss -tlnp 'sport = :5432'; exit 1; }
+          echo "no PostgreSQL clusters remain"
+
+      - name: Point the acceptance domain at loopback
+        run: echo "127.0.0.1 ${INFRA_COD_DOMAIN}" | sudo tee -a /etc/hosts
+
+      - name: Install run 1
+        id: install1
+        run: |
+          set -euo pipefail
+          sudo -E bash deploy/install.sh \
+            --artifact "${{ steps.artifact.outputs.tarball }}" \
+            --checksums "${{ steps.artifact.outputs.checksums }}" \
+            --signature "${{ steps.artifact.outputs.signature }}" \
+            --public-key "${{ steps.minisign.outputs.pub }}" \
+            --domain "${INFRA_COD_DOMAIN}" \
+            --acme-email ci@example.com \
+            --json > "${RUNNER_TEMP}/receipt.json"
+          # --json means stdout is the receipt and nothing else. If a single log
+          # line leaks onto it, this fails.
+          jq -e '.ok == true and (.version | length > 0)' < "${RUNNER_TEMP}/receipt.json"
+          echo "version=$(jq -r .version < "${RUNNER_TEMP}/receipt.json")" >> "${GITHUB_OUTPUT}"
+
+      - name: Install run 2 (idempotency)
+        run: |
+          set -euo pipefail
+          sudo -E bash deploy/install.sh \
+            --artifact "${{ steps.artifact.outputs.tarball }}" \
+            --checksums "${{ steps.artifact.outputs.checksums }}" \
+            --signature "${{ steps.artifact.outputs.signature }}" \
+            --public-key "${{ steps.minisign.outputs.pub }}" \
+            --domain "${INFRA_COD_DOMAIN}" \
+            --acme-email ci@example.com \
+            --json > "${RUNNER_TEMP}/receipt2.json"
+          jq -e '.ok == true' < "${RUNNER_TEMP}/receipt2.json"
+          # The same release, so the same version and the same release directory.
+          test "$(jq -r .version < "${RUNNER_TEMP}/receipt2.json")" = "${{ steps.install1.outputs.version }}"
+
+      - name: Install run 3 (--resume over a complete install)
+        run: |
+          set -euo pipefail
+          sudo -E bash deploy/install.sh \
+            --artifact "${{ steps.artifact.outputs.tarball }}" \
+            --checksums "${{ steps.artifact.outputs.checksums }}" \
+            --signature "${{ steps.artifact.outputs.signature }}" \
+            --public-key "${{ steps.minisign.outputs.pub }}" \
+            --domain "${INFRA_COD_DOMAIN}" \
+            --acme-email ci@example.com \
+            --resume
+
+      # The documented command, not a path to a .mjs file. If the installer did
+      # not put the shim on PATH, this step is where that shows.
+      - name: Verify infra-cod doctor
+        run: |
+          set -euo pipefail
+          sudo infra-cod doctor --json > "${RUNNER_TEMP}/doctor.json" || true
+          cat "${RUNNER_TEMP}/doctor.json"
+          jq -e '.critical == 0' < "${RUNNER_TEMP}/doctor.json"
+          # Caddy is checked at the path the unit runs, against the pinned version.
+          jq -e '.checks[] | select(.check == "runtime.caddy") | .ok' < "${RUNNER_TEMP}/doctor.json"
+          # All three supervisor sockets, not one.
+          jq -e '[.checks[] | select(.check | startswith("systemd.socket."))] | length == 3' \
+            < "${RUNNER_TEMP}/doctor.json"
+
+      # The installer does not install the agent CLIs (deploy/install-manifest.json,
+      # agentRuntimes). That has to be visible rather than surface later as ENOENT
+      # on the first agent task, so doctor reports both, and this asserts it does.
+      - name: Agent runtimes are reported, not assumed
+        run: |
+          set -euo pipefail
+          jq -e '[.checks[] | select(.check | startswith("runtime.agent_cli."))] | length == 2' \
+            < "${RUNNER_TEMP}/doctor.json"
+          jq -r '.checks[] | select(.check | startswith("runtime.agent_cli.")) | "\(.check): \(.severity) — \(.message)"' \
+            < "${RUNNER_TEMP}/doctor.json"
+          # Whatever the runtime users can see is what the supervisor will exec.
+          for user in codex-poc opencode-worker; do
+            echo "--- ${user} ---"
+            sudo runuser -u "${user}" -- env PATH=/usr/local/bin:/usr/bin:/bin sh -c \
+              'command -v codex || echo "codex: not installed"; command -v opencode || echo "opencode: not installed"'
+          done
+
+      - name: Long-running units are active
+        run: |
+          for u in infra-cod-web infra-cod-caddy infra-cod-dispatcher \
+            infra-cod-reconciler infra-cod-runtime-supervisor; do
+            sudo systemctl is-active --quiet "${u}.service" \
+              || { echo "${u} is not active"; sudo systemctl status --no-pager "${u}.service"; exit 1; }
+          done
+
+      # Type=oneshot units are `inactive` once they have run, so `is-active` is
+      # the wrong question for them: the answer is Result=success.
+      - name: Oneshot units completed successfully
+        run: |
+          for u in infra-cod-backup infra-cod-restore-drill infra-cod-health; do
+            RESULT=$(sudo systemctl show --property=Result --value "${u}.service")
+            [ "${RESULT}" = "success" ] \
+              || { echo "${u}: Result=${RESULT}"; sudo journalctl -u "${u}.service" --no-pager -n 50; exit 1; }
+          done
+
+      - name: Timers are armed
+        run: |
+          for u in infra-cod-backup infra-cod-restore-drill infra-cod-health; do
+            sudo systemctl is-active --quiet "${u}.timer" || { echo "${u}.timer is not active"; exit 1; }
+          done
+
+      # The panel has no JSON login endpoint. Signing in is a form POST to
+      # /auth/login carrying the pre-auth CSRF token from the login page and the
+      # cookie that was set alongside it, from the configured origin. Anything
+      # less is not a login smoke test; it is a test of a route that is absent.
+      - name: Login smoke test
+        run: |
+          set -euo pipefail
+          BASE="https://${INFRA_COD_DOMAIN}"
+          JAR="${RUNNER_TEMP}/cookies.txt"
+
+          # The credentials file is root-only, and the values are `key=value`.
+          USERNAME=$(sudo sed -n 's/^username=//p' /etc/infra-cod/initial-credentials)
+          PASSWORD=$(sudo sed -n 's/^password=//p' /etc/infra-cod/initial-credentials)
+          [ -n "${USERNAME}" ] && [ -n "${PASSWORD}" ] || { echo "could not read credentials"; exit 1; }
+
+          # Caddy serves a certificate from its own internal CA for a .localhost
+          # name; -k accepts it without teaching the runner to trust that CA.
+          LOGIN_HTML=$(curl -sk -c "${JAR}" "${BASE}/login")
+          CSRF=$(printf '%s' "${LOGIN_HTML}" \
+            | grep -o 'name="csrf_token" value="[^"]*"' | head -1 | sed 's/.*value="//; s/"$//')
+          [ -n "${CSRF}" ] || { echo "no pre-auth CSRF token in the login page"; exit 1; }
+
+          STATUS=$(curl -sk -o "${RUNNER_TEMP}/login-body" -w '%{http_code}' \
+            -b "${JAR}" -c "${JAR}" \
+            -H "Origin: ${BASE}" \
+            -H "Referer: ${BASE}/login" \
+            --data-urlencode "username=${USERNAME}" \
+            --data-urlencode "password=${PASSWORD}" \
+            --data-urlencode "csrf_token=${CSRF}" \
+            -D "${RUNNER_TEMP}/login-headers" \
+            "${BASE}/auth/login")
+          LOCATION=$(sed -n 's/^[Ll]ocation: //p' "${RUNNER_TEMP}/login-headers" | tr -d '\r')
+          echo "login -> ${STATUS} ${LOCATION}"
+
+          # A bootstrapped operator must change the password, so success is a 303
+          # to /change-password. A redirect back to /login carries the reason in
+          # the query string and is a failure.
+          [ "${STATUS}" = "303" ] || { echo "expected 303, got ${STATUS}"; exit 1; }
+          case "${LOCATION}" in
+            */change-password) : ;;
+            *) echo "login did not succeed: ${LOCATION}"; exit 1 ;;
+          esac
+
+          # The session cookie is the proof, and it must be the __Host- one.
+          grep -q "__Host-infra_cod_session" "${JAR}" || { echo "no session cookie was set"; exit 1; }
+          echo "login OK"
+
+      # The evidence a report should carry, printed once, in one place.
+      - name: Evidence
+        run: |
+          set -euo pipefail
+          echo "::group::postgresql"
+          systemctl is-active postgresql@17-main.service
+          echo "::endgroup::"
+          echo "::group::long-running services"
+          node -e 'import("./services/operations/unit-contract.mjs").then(m => console.log(m.LONG_RUNNING_SERVICES.join("\n")))' \
+            | while read -r unit; do printf '%s: %s\n' "${unit}" "$(systemctl is-active "${unit}.service")"; done
+          echo "::endgroup::"
+          echo "::group::oneshots"
+          node -e 'import("./services/operations/unit-contract.mjs").then(m => console.log(m.ONESHOT_SERVICES.join("\n")))' \
+            | while read -r unit; do printf '%s: %s\n' "${unit}" "$(systemctl show -p Result --value "${unit}.service")"; done
+          echo "::endgroup::"
+          echo "::group::timers"
+          node -e 'import("./services/operations/unit-contract.mjs").then(m => console.log(m.TIMERS.join("\n")))' \
+            | while read -r unit; do printf '%s: %s\n' "${unit}" "$(systemctl is-active "${unit}.timer")"; done
+          echo "::endgroup::"
+          echo "::group::sockets"
+          sudo ls -l /run/infra-cod/
+          echo "::endgroup::"
+          echo "::group::a worker through the current symlink"
+          # The guard that made nine services exit 0 without doing anything.
+          sudo -u infra-control env PGHOST=/var/run/postgresql PGUSER=infra_worker PGDATABASE=infra_cod \
+            /opt/node/bin/node /opt/infra-cod/current/services/control-plane/dispatcher.mjs once
+          echo "dispatcher once through current: OK"
+          echo "::endgroup::"
+
+      - name: Check no secrets in journal
+        run: |
+          set -euo pipefail
+          USERNAME=$(sudo sed -n 's/^username=//p' /etc/infra-cod/initial-credentials)
+          PASSWORD=$(sudo sed -n 's/^password=//p' /etc/infra-cod/initial-credentials)
+          PEPPER=$(sudo sed -n 's/^INFRA_COD_AUTH_PEPPER=//p' /etc/infra-cod/web.env)
+          # The scan looks for the actual secret values, not for the words
+          # "password" or "token": those appear in ordinary log lines and made the
+          # previous check fail on every run that logged anything at all.
+          FOUND=0
+          for value in "${PASSWORD}" "${PEPPER}"; do
+            [ -n "${value}" ] || continue
+            if sudo journalctl --no-pager -o cat | grep -qF "${value}"; then
+              echo "ERROR: a secret value appears in the journal"
+              FOUND=1
+            fi
+          done
+          [ "${FOUND}" -eq 0 ] || exit 1
+          echo "journal secret scan: OK (username ${#USERNAME} chars, not searched)"
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          sudo systemctl --no-pager --failed || true
+          # Every unit that failed, not a hand-picked two: the first run to reach
+          # the oneshots died on one whose log this step did not print.
+          for unit in $(sudo systemctl list-units --state=failed --no-legend --plain \
+              | awk '{print $1}'); do
+            echo "::group::journal ${unit}"
+            sudo journalctl --no-pager -n 200 -u "${unit}" || true
+            echo "::endgroup::"
+          done
+          for unit in infra-cod-web infra-cod-caddy infra-cod-health infra-cod-backup \
+              infra-cod-restore-drill infra-cod-runtime-supervisor infra-cod-dispatcher; do
+            echo "::group::journal ${unit}.service"
+            sudo journalctl --no-pager -n 120 -u "${unit}.service" || true
+            echo "::endgroup::"
+          done
+          sudo cat /etc/infra-cod/.install-state 2>/dev/null || true

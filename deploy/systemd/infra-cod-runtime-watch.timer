@@ -1,0 +1,15 @@
+[Unit]
+Description=Hourly infra_cod runtime watch
+# A member of the target like the other timers: it stops with the stack.
+PartOf=infra-cod.target
+
+[Timer]
+# Hourly since 0127: a release is offered as soon as it is published, and the
+# update timer qualifies it — a day's wait to notice it would undo that.
+OnCalendar=hourly
+RandomizedDelaySec=10m
+Persistent=true
+Unit=infra-cod-runtime-watch.service
+
+[Install]
+WantedBy=timers.target

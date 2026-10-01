@@ -1,0 +1,12 @@
+{
+  "package": "@agentic/design-system",
+  "repository": "https://github.com/STpytut/ads (private)",
+  "commit": "288db4290d11d94935fd084a28b5d56bb3db2747",
+  "committedAt": "2026-09-15T15:57:13+03:00",
+  "why": "Stage 12.2, the panel on the design system with Tailwind v4 and the package's React components (owner's decision U1 (b)). A pinned copy, not a git dependency: the repository is private and the signed release build must be reproducible from this tree and the lockfile alone. Update by copying a newer commit and changing this file in one pull request; never edit the copy in place.",
+  "copied": ["src/", "css/", "fonts/", "tokens/", "README.md", "docs/principles.md", "docs/migration.md"],
+  "changed": {
+    "package.json": "devDependencies and scripts removed: they build the design system itself (token generation, the site) and would pull its toolchain into this lockfile. exports, files, peerDependencies unchanged."
+  },
+  "notCopied": ["scripts/", "site/", "preview/", "figma/", "node_modules/", "CHANGELOG.md"]
+}

@@ -1,0 +1,15 @@
+[Unit]
+Description=Daily infra_cod encrypted backup
+# The target starts this timer; `PartOf=` is what makes it stop with the target
+# as well. Without it, `systemctl stop infra-cod.target` leaves the timer active
+# and it fires the next daily run against a stack that was just stopped.
+PartOf=infra-cod.target
+
+[Timer]
+OnCalendar=*-*-* 02:15:00 UTC
+RandomizedDelaySec=15m
+Persistent=true
+Unit=infra-cod-backup.service
+
+[Install]
+WantedBy=timers.target

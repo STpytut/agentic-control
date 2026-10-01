@@ -1,0 +1,56 @@
+#!/bin/bash
+# The shell a runtime's tools run commands in on a writing surface (Stage 12
+# M0, docs/STAGE_12_CREDENTIAL_ISOLATION.md). OpenCode takes its bash tool's
+# shell from $SHELL and runs `$SHELL -c <command>`; this is that shell: bash in
+# bubblewrap, with the runtime's login covered.
+#
+# INFRA_COD_HIDDEN_STATE lists what to cover, colon-separated: a relative
+# entry is under $HOME (a qualification's scratch home), an absolute one is
+# taken as it is (the real home). A directory is covered by an empty tmpfs, a
+# file by /dev/null. The runtime process itself still sees them: only the
+# commands it runs are in here.
+#
+# Its own PID namespace, so /proc/<the runtime's pid>/root — the way around a
+# mount namespace — is not there to follow. Nothing else changes: the
+# workspace, /tmp and the network are what the launch gave the runtime.
+#
+# Fails closed: without the list, or when bubblewrap cannot start, the command
+# does not run.
+set -u
+if [ -z "${INFRA_COD_HIDDEN_STATE:-}" ] || [ -z "${HOME:-}" ]; then
+  echo "infra-cod sandbox shell: nothing to hide is declared; refusing to run" >&2
+  exit 126
+fi
+cover=()
+IFS=: read -r -a entries <<< "$INFRA_COD_HIDDEN_STATE"
+for entry in "${entries[@]}"; do
+  [ -n "$entry" ] || continue
+  case "$entry" in
+    /*) target="$entry" ;;
+    *) target="$HOME/$entry" ;;
+  esac
+  if [ -d "$target" ]; then
+    cover+=(--tmpfs "$target")
+  elif [ -e "$target" ]; then
+    cover+=(--ro-bind /dev/null "$target")
+  fi
+done
+# INFRA_COD_KEPT_STATE: what inside a covered directory the shell must still
+# reach, bound back over the cover (bwrap mounts in order). Claude Code writes
+# a snapshot of its shell's environment to ~/.claude/shell-snapshots and has
+# every command source it; hidden with the rest of ~/.claude, no command ran
+# (Stage 12 X1, on the host). Made first if missing — the shell cannot make it
+# once the directory is covered.
+if [ -n "${INFRA_COD_KEPT_STATE:-}" ]; then
+  IFS=: read -r -a kept <<< "$INFRA_COD_KEPT_STATE"
+  for entry in "${kept[@]}"; do
+    [ -n "$entry" ] || continue
+    case "$entry" in
+      /*) target="$entry" ;;
+      *) target="$HOME/$entry" ;;
+    esac
+    mkdir -p "$target" 2>/dev/null || true
+    [ -d "$target" ] && cover+=(--bind "$target" "$target")
+  done
+fi
+exec /usr/bin/bwrap --dev-bind / / "${cover[@]}" --unshare-pid --proc /proc --die-with-parent -- /bin/bash "$@"

@@ -1,0 +1,35 @@
+[Unit]
+Description=infra_cod Codex account credential broker
+After=network-online.target postgresql@17-main.service infra-cod-runtime-supervisor.service
+Wants=network-online.target
+Wants=postgresql@17-main.service infra-cod-runtime-supervisor.service
+
+PartOf=infra-cod.target
+
+[Service]
+Type=simple
+User=infra-control
+Group=infra-control
+WorkingDirectory=/opt/infra-cod/current
+Environment=CONTROL_PLANE_DB=infra_cod
+EnvironmentFile=-/etc/infra-cod/database.env
+Environment=PGUSER=infra_worker
+Environment=RUNTIME_SUPERVISOR_SOCKET=/run/infra-cod/runtime-supervisor.sock
+Environment=CODEX_ACCOUNT_WORKER_ID=vps-codex-account-worker-1
+Environment=CODEX_ACCOUNT_POLL_MS=60000
+ExecStart=/opt/node/bin/node /opt/infra-cod/current/services/control-plane/codex-account-worker.mjs
+Restart=on-failure
+TimeoutStopSec=20
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+MemoryDenyWriteExecute=false
+TasksMax=32
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,41 @@
+{
+  "name": "@agentic/design-system",
+  "version": "0.1.0",
+  "description": "Tokens, CSS and React components shared by Agentic Marketing, Agentic Lab and every product in the ecosystem.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/STpytut/ads.git"
+  },
+  "private": true,
+  "type": "module",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./tokens": "./src/tokens.generated.ts",
+    "./tokens.json": "./tokens/tokens.json",
+    "./tokens.flat.json": "./tokens/tokens.flat.json",
+    "./tailwind.css": "./css/index.css",
+    "./tokens.css": "./css/tokens.css",
+    "./fonts.css": "./css/fonts.css",
+    "./base.css": "./css/base.css",
+    "./utilities.css": "./css/utilities.css",
+    "./fonts/*": "./fonts/*"
+  },
+  "files": [
+    "src",
+    "css",
+    "fonts",
+    "tokens"
+  ],
+  "peerDependencies": {
+    "react": ">=19",
+    "tailwindcss": ">=4.1"
+  },
+  "peerDependenciesMeta": {
+    "tailwindcss": {
+      "optional": true
+    }
+  }
+}

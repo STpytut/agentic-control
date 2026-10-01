@@ -1,0 +1,15 @@
+[Unit]
+Description=Weekly infra_cod restore verification
+# Same as the backup timer. The drill restores the newest backup into a throwaway
+# cluster; running it while the stack is stopped is not a maintenance action
+# anybody asked for.
+PartOf=infra-cod.target
+
+[Timer]
+OnCalendar=Sat *-*-* 03:15:00 UTC
+RandomizedDelaySec=30m
+Persistent=true
+Unit=infra-cod-restore-drill.service
+
+[Install]
+WantedBy=timers.target

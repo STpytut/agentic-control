@@ -1,0 +1,65 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+*.pem
+.vercel/
+.pnpm-store/
+# Without the trailing slash this also covers a *symlink* named node_modules,
+# which is what a second worktree uses to share the main checkout's install.
+# With the slash it did not, and `git add -A` committed the link; the gate
+# then failed before any suite, on `mv: cannot overwrite non-directory`.
+node_modules
+.next/
+.next-*/
+out/
+coverage/
+*.tsbuildinfo
+apps/web/ui-preview*.png
+pocs/codex-runtime/artifacts/*.jsonl
+pocs/codex-runtime/artifacts/*.log
+pocs/codex-runtime/artifacts/latest-*.json
+pocs/codex-runtime/artifacts/latest-session-id.txt
+pocs/codex-runtime/workspace/codex-poc-phase-*.txt
+pocs/codex-runtime/generated/
+pocs/codex-app-server/artifacts/*.jsonl
+pocs/codex-app-server/artifacts/*.log
+pocs/codex-app-server/artifacts/latest-result.json
+pocs/codex-app-server/generated/
+pocs/codex-app-server/workspace/app-server-*.txt
+pocs/codex-app-server/approval-outside-workspace.txt
+pocs/codex-platform-tools/artifacts/*.jsonl
+pocs/codex-platform-tools/artifacts/*.log
+pocs/codex-platform-tools/artifacts/latest-*.json
+pocs/codex-platform-tools/workspace/platform-tool-result.txt
+pocs/opencode-runtime/artifacts/*.jsonl
+pocs/opencode-runtime/artifacts/*.log
+pocs/opencode-runtime/artifacts/latest-*.json
+pocs/opencode-runtime/artifacts/latest-session-id.txt
+pocs/opencode-runtime/workspace/opencode-poc-*.txt
+pocs/opencode-runtime/workspace/raw-smoke.txt
+pocs/opencode-server/artifacts/latest-result.json
+pocs/opencode-server/artifacts/*.log
+pocs/codex-opencode-handoff/artifacts/*.jsonl
+pocs/codex-opencode-handoff/artifacts/*.log
+pocs/codex-opencode-handoff/artifacts/latest-*.json
+.vercel
+
+# Local scratch: staging trees and gate logs from scripts/stage-standalone.mjs.
+.tmp-stage78/
+.tmp-*/
+
+# Local Supabase dev shims
+.tmp-supabase-test/
+
+# Release build output: staging trees and published artifacts.
+dist/
+
+# Release signing material. The private half is never committed; a detached
+# signature belongs next to the artifact it signs, not in the tree that produces it.
+release/keys/*.key
+*.minisig
+
+# Per-machine agent permissions. Never shared through the repository: a
+# permission file that arrives with a checkout grants access nobody reviewed.
+.claude/settings.local.json

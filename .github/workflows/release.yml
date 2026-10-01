@@ -1,0 +1,478 @@
+name: release
+
+# Two modes, one workflow.
+#
+#   * On a pull request or an ordinary commit the artifact is built *unsigned* and
+#     the whole release contract is exercised against it. The signing tests use an
+#     ephemeral key, so the sign/verify/tamper paths run without any real key
+#     existing.
+#   * On a `v*` tag the same checks run, then the artifact is built twice and
+#     compared, then signed with the production key, and the public half is checked
+#     again before anything is published.
+#
+# What is deliberately not here: no step downloads a verifier, no step prints an
+# environment dump, and no job holds a permission it does not need.
+#
+# Every job runs on `ubuntu-24.04`, which is the only place a *publishable* artifact
+# can be produced. The database is a service container: the unit, DB-integration and
+# SQL suites need a real PostgreSQL 17 with the migrations applied, and a workflow
+# that only set `PGHOST` would be statically unable to pass `npm run check`.
+
+# One run per change.
+#
+# `push` on every branch plus `pull_request` meant two identical runs for every
+# commit on every branch with a PR open: the same 120-minute release candidate
+# twice, the same acceptance twice. Branches are now checked where the review
+# happens — on the pull request — and `push` is reserved for the two refs where
+# there is no pull request to check: `main` and release tags.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run the whole tag job including signing, but do not publish a release."
+        type: boolean
+        default: false
+
+# A new push supersedes the run it interrupted — but only on a pull request.
+# A tag build signs and publishes, and cancelling one halfway is how a release
+# ends up half-uploaded; `main` is the record of what was merged. Neither is
+# something a later push should be allowed to abandon.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "24.20.0"
+  PNPM_VERSION: "11.9.0"
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  scope:
+    name: what changed
+    uses: ./.github/workflows/scope.yml
+
+  candidate:
+    name: release candidate (unsigned)
+    # Not for a tag (the signed build covers it), not for a draft, and not for a
+    # change that touches nothing a release is built from. Two hours of runner
+    # time to prove that a paragraph of prose still compiles is two hours spent
+    # saying nothing.
+    if: >-
+      ${{ !startsWith(github.ref, 'refs/tags/v')
+        && github.event.pull_request.draft != true
+        && needs.scope.outputs.code == 'true' }}
+    needs: scope
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/infra_cod_ci
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: install
+        run: pnpm install --frozen-lockfile
+
+      - name: install the preflight tools the release contract names
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends minisign
+          minisign -v
+
+      - name: create and migrate the database
+        run: |
+          set -eu
+          createdb -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" infra_cod_ci
+          npm run db:migrate
+
+      - name: project gate
+        run: npm run check
+
+      - name: release structural tests
+        run: npm run test:release
+
+      - name: minisign interoperability
+        # `require-minisign` fails rather than skipping when the binary is absent.
+        # A skipped interoperability test reports green while the one check that can
+        # catch an incompatible signing key never runs, and CI installs the binary
+        # precisely so this cannot happen.
+        run: npm run test:release:require-minisign
+
+      - name: build, verify, relocate and smoke
+        run: node scripts/check-release.mjs --artifacts dist/releases --no-determinism
+        env:
+          INFRA_COD_RELEASE_SKIP_BUILD: "1"
+
+      - name: offline smoke in a network namespace
+        # The artifact path is resolved in Node rather than by a shell glob. A glob
+        # that matches nothing is passed through literally, so an empty artifacts
+        # directory produced "ls: cannot access 'dist/releases/*/*.tar.gz'" followed
+        # by a smoke run against a path that did not exist — two confusing errors for
+        # one cause.
+        run: |
+          set -eu
+          ARTIFACT=$(node -e '
+            const { readdirSync, statSync } = require("node:fs");
+            const path = require("node:path");
+            const found = readdirSync("dist/releases")
+              .filter((name) => !name.startsWith("."))
+              .filter((name) => statSync(path.join("dist/releases", name)).isDirectory())
+              .flatMap((directory) => readdirSync(path.join("dist/releases", directory))
+                .filter((file) => file.endsWith(".tar.gz"))
+                .map((file) => path.join("dist/releases", directory, file)));
+            if (found.length !== 1) {
+              console.error("expected exactly one release tarball under dist/releases, found", found.length, found);
+              process.exit(1);
+            }
+            process.stdout.write(found[0]);
+          ')
+          echo "offline smoke against $ARTIFACT"
+          node scripts/offline-smoke.mjs --artifact "$ARTIFACT"
+        env:
+          # On Linux this check must run. Without this the command exits 78 and the
+          # step would pass while the guarantee it exists for was never tested — the
+          # same failure mode as the smoke that accepted a crashed server.
+          INFRA_COD_OFFLINE_REQUIRED: "1"
+
+      - name: upload the candidate as CI evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-candidate
+          retention-days: 7
+          # The whole per-version directory: the tarball, its checksum file and the
+          # build summary travel together, so an evidence download is one complete
+          # release rather than a directory of loose files.
+          path: dist/releases/*/
+
+  publish:
+    name: publish signed release
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      # Read-only for the whole job. It installs dependencies, builds, runs the test
+      # suite and signs — none of which needs write access to the repository. The
+      # earlier version held `contents: write` across all of that, so a compromised
+      # dependency or a test could have used the release token.
+      contents: read
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/infra_cod_ci
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: install
+        run: pnpm install --frozen-lockfile
+
+      - name: install the preflight tools the release contract names
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends minisign
+          minisign -v
+
+      - name: create and migrate the database
+        run: |
+          set -eu
+          createdb -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" infra_cod_ci
+          npm run db:migrate
+
+      - name: project gate
+        run: npm run check
+
+      - name: check tag, version and tree
+        # `github.ref_name` is the tag *including* its `v`, and `versionFromTag`
+        # strips it. The first version passed the tag in as the expected version, so
+        # it compared `v0.1.0` against `0.1.0` and every publish job stopped here
+        # before signing — invisible to the candidate job, which is skipped on a tag.
+        #
+        # The version is derived once, in shell, and the derivation is then checked
+        # against the same function the builder uses. Both halves matter: the shell
+        # value is what the rest of the job consumes, and the Node call is what
+        # proves the contract still means what the shell assumes.
+        run: |
+          set -eu
+          test "$(git rev-parse HEAD)" = "$(git rev-parse "$GITHUB_REF_NAME^{commit}")"
+          test -z "$(git status --porcelain)"
+
+          TAG="$GITHUB_REF_NAME"
+          case "$TAG" in
+            v*) VERSION="${TAG#v}" ;;
+            *) echo "::error::tag $TAG does not start with v"; exit 1 ;;
+          esac
+          echo "tag $TAG names version $VERSION"
+
+          # Exported so the child process sees the shell's value, not the tag.
+          export VERSION
+          node --input-type=module -e "
+            const { versionFromTag, parseVersion } = await import('./scripts/lib/release-version.mjs');
+            const fromFunction = versionFromTag(process.env.TAG);
+            parseVersion(fromFunction);
+            if (fromFunction !== process.env.VERSION) {
+              console.error('the version contract disagrees with the shell: function says', fromFunction, 'shell says', process.env.VERSION);
+              process.exit(1);
+            }
+          "
+          echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
+        env:
+          TAG: ${{ github.ref_name }}
+        shell: bash
+      - name: pinned toolchain
+        run: |
+          set -eu
+          test "$(node --version)" = "v$NODE_VERSION"
+          test "$(pnpm --version)" = "$PNPM_VERSION"
+
+      - name: minisign interoperability
+        # `require-minisign` fails rather than skipping when the binary is absent.
+        # A skipped interoperability test reports green while the one check that can
+        # catch an incompatible signing key never runs, and CI installs the binary
+        # precisely so this cannot happen.
+        run: npm run test:release:require-minisign
+
+      - name: build twice, compare, and verify
+        run: node scripts/check-release.mjs --artifacts dist/releases --determinism
+        env:
+          INFRA_COD_RELEASE_SKIP_BUILD: "0"
+
+      - name: provision the signing key
+        run: |
+          set -eu
+          if [ -z "${MINISIGN_SECRET_KEY:-}" ]; then
+            echo "::error::MINISIGN_SECRET_KEY is not set. A publish build without the production key is refused;"
+            echo "::error::there is no unsigned fallback. See release/keys/README.md."
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$MINISIGN_SECRET_KEY" > "$RUNNER_TEMP/infra-cod-release.key"
+          echo "INFRA_COD_RELEASE_KEY_FILE=$RUNNER_TEMP/infra-cod-release.key" >> "$GITHUB_ENV"
+        env:
+          MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
+
+      - name: publish mode requires the committed public key
+        run: |
+          set -eu
+          test -f release/keys/infra-cod-release.pub || {
+            echo "::error::release/keys/infra-cod-release.pub is missing; provision the release signing key before tagging"
+            exit 1
+          }
+
+      - name: build and sign
+        run: |
+          set -eu
+          rm -rf dist/releases dist/release-work
+          node scripts/build-release.mjs \
+            --publish \
+            --version "$RELEASE_VERSION" \
+            --public-key release/keys/infra-cod-release.pub \
+            --out dist/releases \
+            --work dist/release-work
+
+      - name: re-verify against the committed public key
+        run: |
+          set -eu
+          ARTIFACT="dist/releases/${RELEASE_VERSION}-linux-x64/infra-cod-${RELEASE_VERSION}-linux-x64.tar.gz"
+          node scripts/verify-release.mjs \
+            --artifact "$ARTIFACT" \
+            --public-key release/keys/infra-cod-release.pub \
+            --require-signature \
+            --version "$RELEASE_VERSION" \
+            --target linux-x64 \
+            --smoke
+          sh release/verify-release.sh \
+            --artifact "$ARTIFACT" \
+            --public-key release/keys/infra-cod-release.pub \
+            --require-signature \
+            --version "${GITHUB_REF_NAME#v}"
+
+      - name: offline smoke in a network namespace
+        run: |
+          set -eu
+          ARTIFACT="dist/releases/${RELEASE_VERSION}-linux-x64/infra-cod-${RELEASE_VERSION}-linux-x64.tar.gz"
+          test -f "$ARTIFACT" || {
+            echo "::error::$ARTIFACT does not exist; the release build did not produce it"
+            exit 1
+          }
+          node scripts/offline-smoke.mjs \
+            --artifact "$ARTIFACT" \
+            --public-key release/keys/infra-cod-release.pub \
+            --require-signature
+        env:
+          INFRA_COD_OFFLINE_REQUIRED: "1"
+
+      - name: remove the signing key before uploading anything
+        run: rm -f "$RUNNER_TEMP/infra-cod-release.key"
+        if: always()
+
+      - name: upload the signed release set
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          # The signed bytes, handed to the publishing job as data. That job has
+          # `contents: write` and does nothing else, so the token exists for one short
+          # step that never runs repository code.
+          name: signed-release
+          retention-days: 3
+          path: dist/releases/*/
+
+  # ---------------------------------------------------------------------------
+  # Verify the upload round-trip whenever the signed build succeeds (including
+  # dry-run). On an ordinary branch or PR push the publish job is skipped and
+  # therefore no artifact exists to verify, so this job is skipped too.
+  # Read-only: checks out the pinned key and the verifiers, downloads the signed set,
+  # installs only minisign, and verifies from scratch.
+  # ---------------------------------------------------------------------------
+  verify:
+    name: verify uploaded bytes
+    needs: publish
+    if: ${{ needs.publish.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            release
+            scripts
+
+      - name: install minisign
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends minisign
+          minisign -v
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: signed-release
+          path: signed
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: re-verify the downloaded bytes against the committed public key
+        run: |
+          set -eu
+          shopt -s nullglob
+          ARTIFACTS=(signed/*/infra-cod-*.tar.gz)
+          test "${#ARTIFACTS[@]}" -eq 1 || {
+            echo "::error::expected exactly one signed tarball, found ${#ARTIFACTS[@]}"
+            exit 1
+          }
+          sh release/verify-release.sh \
+            --artifact "${ARTIFACTS[0]}" \
+            --public-key release/keys/infra-cod-release.pub \
+            --require-signature
+          node scripts/verify-release.mjs \
+            --artifact "${ARTIFACTS[0]}" \
+            --checksums "$(dirname "${ARTIFACTS[0]}")/SHA256SUMS" \
+            --signature "$(dirname "${ARTIFACTS[0]}")/SHA256SUMS.minisig" \
+            --public-key release/keys/infra-cod-release.pub \
+            --require-signature \
+            --target linux-x64
+          {
+            echo "RELEASE_TARBALL=${ARTIFACTS[0]}"
+            echo "RELEASE_DIR=$(dirname "${ARTIFACTS[0]}")"
+          } >> "$GITHUB_ENV"
+
+      - name: persist the verified release directory for the publish job
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: verified-release
+          retention-days: 1
+          path: |
+            ${{ env.RELEASE_DIR }}/infra-cod-*.tar.gz
+            ${{ env.RELEASE_DIR }}/SHA256SUMS
+            ${{ env.RELEASE_DIR }}/SHA256SUMS.minisig
+
+  # ---------------------------------------------------------------------------
+  # Publish. Only this job holds `contents: write`; it does nothing except
+  # download the already-verified set and call the release action.
+  # dry_run skips it, so a verification run exercises the upload round-trip through
+  # the verify job and still publishes nothing.
+  # ---------------------------------------------------------------------------
+  release:
+    name: upload the release
+    needs: verify
+    if: ${{ !inputs.dry_run && needs.verify.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: verified-release
+          path: verified
+
+      - name: publish
+        uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
+        with:
+          files: |
+            verified/infra-cod-*.tar.gz
+            verified/SHA256SUMS
+            verified/SHA256SUMS.minisig
+          fail_on_unmatched_files: true

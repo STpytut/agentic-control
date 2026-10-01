@@ -1,0 +1,325 @@
+{
+  "schema": "infra-cod/schema-compatibility/1",
+  "_comment": [
+    "Whether the release *before* a migration can keep reading the schema *after* it.",
+    "",
+    "This is the fact `infra-cod update` needs and cannot derive: it decides whether the",
+    "old application may keep serving while the migration runs, and whether an",
+    "application-only rollback to that release is a rollback or a corruption. SQL cannot",
+    "be asked the question \u2014 a DROP COLUMN and an ADD COLUMN are the same kind of",
+    "statement to a parser \u2014 so every migration declares it, and a migration that",
+    "declares nothing is treated as incompatible.",
+    "",
+    "`unverifiedThrough` is the boundary of the contract, not a claim about those files.",
+    "0001-0050 were deployed before this contract existed and nobody re-derived their",
+    "compatibility. They are already applied on the only installation there is, so no",
+    "update applies them; if one ever is pending, the update refuses rather than guesses.",
+    "",
+    "`db/tests`-style enforcement: services/operations/test/schema-compatibility.test.mjs",
+    "fails when a migration after the boundary has no entry, so a new migration cannot",
+    "reach a release without an answer."
+  ],
+  "unverifiedThrough": "0050",
+  "migrations": {
+    "0053_runtime_lease_and_defer.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds `lease_expires_at` to what six claim functions return, and adds five new defer_* functions. The previous release ignores the extra key and never calls the new functions, so it keeps working against this schema unchanged. No column, table or constraint changes."
+    },
+    "0054_runtime_dispatch_readiness.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds two functions and replaces `capture_task_runtime_snapshot` with a version that refuses to bind a task to a runtime the host does not report as installed and authenticated. The previous release calls the same signature and reads the same tables; on its schema the replacement simply is not there, and on this schema it behaves as the old one did whenever the host reports ready. No column, table or constraint changes."
+    },
+    "0055_provider_login_surface.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Re-asserts pgcrypto with IF NOT EXISTS, and makes the two provider-login functions SECURITY DEFINER and executable by infra_web. The previous release calls the same signatures and reads the same tables; a grant it does not need costs it nothing, and an extension it already expected being present is the state it was written for. No column, table or constraint changes."
+    },
+    "0056_project_creation_and_github_callback.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds ensure_structural_runtime_profile and makes consume_session_and_record_github_oauth SECURITY DEFINER with a grant to infra_web. The previous release calls the same signatures and reads the same tables; a grant it does not use costs it nothing, and a runtime_profiles row it did not create is one it would have required. No column, table or constraint changes."
+    },
+    "0057_release_runtime_launch.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Widens the runtime_launch_reservations state check with 'released', adds release_runtime_launch, and lets reserve_runtime_launch re-reserve a released row as it already did a cancelled one. The previous release never writes 'released' and its reserve accepts 'cancelled', so it reads and writes the same rows; a state it does not produce costs it nothing. No column or table changes."
+    },
+    "0058_revision_executor_and_idempotent_completion.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Replaces two function bodies and changes no column, table, constraint or grant. request_revision now copies executor_assignment_id from the previous handoff onto the one it creates \u2014 the field the orchestrator's caller already wrote from outside, so the previous release finds it set either way and its own UPDATE becomes a no-op it guards with 'IS NULL'. submit_worker_completion answers an already-stored report before the liveness check instead of after it; the previous release never reached that branch, and the extra 'repeat' key in the result is ignored by a caller that does not read it."
+    },
+    "0059_orchestrator_turns_become_runs.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds a trigger that gives every attempted Codex chat or review job a read-only task run, backfills runs for past attempts, adds a CHECK that an attempted orchestrator job has a run, and redefines finalize_runtime_interrupt and claim_workspace_operation under their existing signatures. The previous release keeps working: its claim receives run_id populated and ignores it, and both redefined functions behave as before for implementation runs. The one reader in the previous release that would misread a turn run \u2014 lock recovery taking the most recent lost run of a project \u2014 is kept correct by construction: a turn run is never marked lost, only failed. What the previous release shows differently is cosmetic: its snapshot's latest run and its health run counts include conversation turns."
+    },
+    "0060_workspace_access_grants.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds workspace_access_grants with issue/resolve functions and a revoke trigger on task_runs, and redefines claim_codex_chat_jobs under its existing signature with one added condition: a Codex job waits while a writer holds the project's workspace. The previous release never calls the new functions; its chat worker calls the same claim and simply finds nothing to claim while an implementation holds the lock, which is the fix, not a break. No existing column, constraint or grant changes."
+    },
+    "0061_deferral_and_input_reply_routing.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds defer_runtime_job and redefines record_orchestrator_turn_run, record_task_chat_message and resolve_worker_interaction under their existing signatures. The previous release never calls defer_runtime_job and never produces a decreasing attempt count, so the redefined trigger behaves for it exactly as 0059's did. record_task_chat_message changes behaviour only when a task has an open input request: the previous release's panel then gets an answered request instead of a queued orchestrator turn, which is the fix. resolve_worker_interaction now also copies the executor assignment onto the resumed handoff, which the previous release's executor needs and never received. No table, column, constraint or grant changes."
+    },
+    "0062_web_functions_run_as_definer.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Restores SECURITY DEFINER on request_revision and resolve_worker_interaction and adds assert_web_functions_run_as_definer. No table, column, constraint or signature changes. The previous release's panel calls the same two functions and now succeeds where it failed with permission denied."
+    },
+    "0063_conversations_and_session_identity.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds conversations, a conversation on every task, a per-conversation number on every task event, and conversation, role and namespace on agent sessions, and backfills all of them. Triggers assign every new column, so the previous release's inserts into tasks, domain_events and agent_sessions, which name none of them, get them filled in. It redefines bind_codex_chat_session, codex_chat_job_context, executor_job_context, orchestrator_turn_session and create_followup_task under their existing signatures; the previous release calls them the same way and receives the same shapes, with the session found by conversation instead of through a copied purpose. What it sees differently: a second follow-up of the same task is refused (followup_exists) where it used to be created, and a follow-up no longer copies session rows. Its panel still reads the chat by followup_of_task_id and occurred_at, which the new columns leave as they were. The migration refuses to run while any task has two follow-ups (conversation_fork_exists)."
+    },
+    "0064_recovery_not_blocked_by_waiting_turns.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Redefines request_workspace_operation under its existing signature, as a definer with the same search_path and grant. recover_lock is no longer refused by a pending read-only Codex turn; it still waits for any job in flight and for a pending implementation, and restore_owner keeps the old rule. The previous release calls the same function the same way and is refused less often, only where the refusal was a deadlock. No table, column or constraint changes."
+    },
+    "0065_layout_migration.sql": {
+      "previousReleaseCompatible": false,
+      "note": "Moves live rows to the product layout: projects.workspace_path and handoffs.workspace_ref from /srv/infra-cod-handoff-poc/workspaces to /srv/infra-cod/workspaces, and the Codex credential reference from codex-home:codex-poc to codex-home:codex-worker, with the two functions that write it redefined from their own definitions. It moves together with the host layout (services/operations/layout-migration.mjs, run by the same runner and reverted if this fails). The previous release looks for the old paths and the old account, which no longer exist, so it cannot serve on this schema: declared incompatible so the coordinator stops every service before the runner, and a rollback past it is a database restore plus layout-migration.mjs revert."
+    },
+    "0066_unreported_run_asks_the_operator.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds finalize_unreported_run, executable by infra_worker; no table, column, constraint or existing function changes. The previous release never calls it and keeps retrying an unreported implementation as before."
+    },
+    "0067_failure_reasons.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds failure_reasons and refuse(), and redefines assert_workspace_fence, start_implementation_job and submit_worker_completion under their existing signatures, search_path and grants. The refusals they raise keep their SQLSTATE and their human sentence and gain a reason in DETAIL, which the previous release does not read; every accepted path is unchanged. No table, column or constraint of an existing object changes."
+    },
+    "0068_null_arguments_are_refused.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Redefines submit_worker_completion and submit_worker_interaction under their existing signatures, search_path and grants, and adds three rows to failure_reasons. The only behaviour change is that a NULL jsonb argument is refused with a reason instead of reaching the table's NOT NULL constraint; every accepted call is unchanged, and the previous release sends those arguments the same way."
+    },
+    "0069_review_evidence.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds review_evidence, review_evidence_bases, review_evidence_deliveries, review_verdicts and publish_preparations with their functions, and redefines finalize_worker_completion, invoke_codex_request_revision, codex_chat_job_context and approve_task_review under their existing signatures, search_path, SECURITY DEFINER and grants; their SQLSTATEs and sentences are unchanged and each refusal gains a reason; codex_chat_job_context changes only the review turn's wording, which no longer calls the workspace read-only. finalize_worker_completion requires evidence only for a run whose base the new supervisor recorded, so the previous release's completions finalize as before. What the previous release meets is approve_task_review refusing a task whose latest implementation has no evidence (review_evidence_missing) \u2014 the fix, not a break: a revision records it. No existing table, column or constraint changes."
+    },
+    "0070_ingress_and_run_mailbox.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds conversation_ingress (filled by an AFTER INSERT trigger on runtime_jobs and backfilled from existing jobs) and run_commands with their functions, and redefines claim_codex_chat_jobs, claim_executor_jobs and request_runtime_interrupt under their existing signatures, search_path, grants and SECURITY DEFINER. The previous release's workers call the same claims and find a job only when no other run of its conversation is live and no earlier message is waiting, which is the ordering this migration adds. Its panel calls request_runtime_interrupt the same way: the call no longer refuses a runtime whose runtime_profiles row lacks `interrupt`, still sets interrupt_requested_at, the event and the audit row once per job, and additionally writes an interrupt command. The previous release's workers poll runtime_interrupt_request, which is unchanged, so an interrupt still stops their runs; the command they never take is closed as failed (run_command_run_ended) when the run ends. No existing table, column or constraint changes."
+    },
+    "0071_runtime_job_provenance.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds runtime_job_selections and runtime_dispatch_attempts with their functions, backfills one selection per existing job (source 'backfill', no versions or capabilities), and redefines request_runtime_interrupt under its 0070 signature, grant and SECURITY DEFINER. The previous release never calls the new functions and records no selection, so the only rows it meets are backfilled ones; request_runtime_interrupt refuses only a job whose launch-recorded driver does not declare interrupt, which the previous release's jobs never have, so its panel's Stop behaves as under 0070. Jobs the previous release launches after this migration carry no selection until they are launched again by this release; its own panel keeps attributing usage by job type as before. No existing table, column or constraint changes."
+    },
+    "0072_runtime_removal_and_dead_letter_recovery.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds runtime_jobs.failure_reason (a foreign key into failure_reasons) with a CHECK that a dead letter has one, and two triggers that name a dead letter its writer did not, from last_error, exactly as the backfill names the rows already dead; runtime_jobs.attempt_base (default 0, so every existing row and every row the previous release writes counts its attempts as before); the runtime_job_recoveries table; and retry_dead_letter_job and dismiss_dead_letter_job for infra_web. Redefines retry_runtime_job, record_runtime_dispatch and start_implementation_job under their existing signatures and grants. The previous release calls all three: retry now ends a job whose runtime the host reports removed, or whose attempts ran out, instead of leaving its run running and its lock held; the launch of a runtime the host reports removed is refused with a reason from the vocabulary, which the previous release's workers already treat as a failed launch and report through retry; and start keeps the event key it always had for every job that was never retried from dead_letter, which the previous release cannot do. The previous release never writes dead_letter directly, so the CHECK cannot refuse it; its panel keeps its Record recovery button, and resolve_runtime_job_incident is unchanged."
+    },
+    "0073_neutral_job_vocabulary_expand.sql": {
+      "previousReleaseCompatible": false,
+      "note": "Widens the runtime_jobs job_type CHECK and the orchestrator-turn CHECK and trigger to admit orchestrator_turn, resume_orchestrator and implementation_run beside the old names, and redefines 27 functions under their existing signatures, grants and search_path: 26 readers now accept both names, and route_outbox_message writes only the new ones. The previous release's application code names the old types itself \u2014 the supervisor's launch context selects job_type='start_implementation' and the orchestrator worker gives review evidence only to 'resume_codex' \u2014 so a job this schema routes would be refused at launch or reviewed without its evidence. Declared incompatible so the coordinator stops every service before the runner. Rows are not rewritten: jobs queued under the old names keep them and this release finishes them. An application-only rollback is not a rollback once a new-named job exists."
+    },
+    "0074_selection_by_role_and_capability.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds runtime_roles, runtime_capabilities and runtime_role_core (a mirror of the adapter registry and the drivers, seeded for Codex as the orchestrator and OpenCode as the executor), runtime_plays(), and a trigger refusing an enabled project_agent_assignments row whose runtime does not play its role; the migration stops, naming them, if any enabled assignment already would be refused. Redefines eleven functions under their existing signatures, grants and SECURITY mode, replacing each runtime_type='codex'/'opencode' decision with runtime_plays(): for the two runtimes this installation has, every answer is the one it was. The previous release calls the same functions and writes the same assignments; the only rows it could write that are now refused are an Antigravity executor, which nothing provisions. Three refusal messages that named a vendor now name the role, and refusals carried from before 0067 gain a DETAIL reason with their sentence and ERRCODE unchanged."
+    },
+    "0075_neutral_orchestrator_functions.sql": {
+      "previousReleaseCompatible": false,
+      "note": "Renames the six workflow functions the orchestrator worker calls (claim_codex_chat_jobs, codex_chat_job_context, bind_codex_chat_session, complete_codex_chat_job, invoke_codex_delegate_task, invoke_codex_request_revision) to neutral names, keeping signatures, grants, owners and search_path, and redefines complete_orchestrator_job because it calls bind_orchestrator_session by name. The previous release's orchestrator worker calls the old names, which no longer exist, so it cannot serve on this schema. Declared incompatible, as 0073 in the same release already is: the coordinator stops every service before the runner. No rows change."
+    },
+    "0076_opencode_plays_the_orchestrator.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds three rows to the 0074 mirror: OpenCode registered for the orchestrator, and its run.read_only and tools.platform capabilities. No table, column, constraint or function changes. The previous release reads the same tables through the same runtime_plays(); the only difference it could see is that an OpenCode orchestrator assignment is now admitted, and its orchestrator worker would then run that turn on Codex's channel path and fail it rather than write anything, since it picks the driver by job type."
+    },
+    "0077_neutral_job_vocabulary_contract.sql": {
+      "previousReleaseCompatible": true,
+      "note": "The contract half of 0073. Renames every runtime_jobs row still carrying codex_chat_turn, resume_codex or start_implementation to orchestrator_turn, resume_orchestrator or implementation_run (stopping, naming the events, if an event has a job under both names), narrows the job_type CHECK, the orchestrator-turn CHECK and its trigger to the new names, and redefines 26 functions under their existing signatures, grants and search_path with the old name taken out of each comparison; claim_runtime_job_for_event no longer maps one name to the other. The previous release writes only the new names (route_outbox_message has since 0073), its application code names only the new ones for every job it claims, launches or reviews, and every function it calls reads the renamed rows exactly as it read them before, since it already accepted both. So it can serve on this schema while the migration runs, and no service needs to stop."
+    },
+    "0078_runtime_defaults_follow_assignments.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds the failure reason runtime_default_not_assigned and redefines set_project_runtime_defaults under its existing signature, grants and search_path, with one check after each role check: where the project has enabled assignments of the role, the default model's runtime must be one of theirs. The previous release's panel calls the same function; the only calls now refused are those that would have put an assignment on another runtime's model, which that release's picker offered and which would have failed the turn. Existing defaults are not re-examined."
+    },
+    "0079_roles_are_permission_sets_expand.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds the role vocabulary (role_permission_vocabulary, permission_capabilities), role_definitions and role_permissions with the two built-ins that are today's behaviour, and task_role_snapshots. project_agent_assignments gains role_definition_id, backfilled from assignment_role and NOT NULL; a trigger fills it from assignment_role for a writer that names only the word, and derives assignment_role from the definition for one that names a definition, so the one-default-orchestrator index holds for any conversation holder. Triggers refuse a forbidden permission combination, a change to a built-in, and an assignment whose runtime lacks a capability its permissions need; guard_assignment_role is redefined under its name with that check added. No decision function changes. The previous release writes assignments by assignment_role and reads only assignment_role, both unchanged in meaning, so it serves on this schema while the migration runs; role-equivalence.test.mjs shows the decisions and events of the host-shaped scenarios are identical before and after."
+    },
+    "0080_decisions_by_permission.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds role_holds(role_definition, permission), executable by infra_worker only, and redefines 13 workflow functions (14 definitions) under their existing signatures, grants, SECURITY mode and search_path, with each assignment_role='orchestrator' now role_holds(\u2026,'conversation.hold') and each 'executor' role_holds(\u2026,'implementation.execute'). Every assignment has a built-in definition since 0079, and the built-ins hold exactly those permissions, so every answer is the one it was; role-equivalence.test.mjs shows identical decisions and events for host-shaped scenarios, a follow-up included, and fails on a mutant. The previous release calls the same functions with the same arguments and writes assignments by the word, which 0079's trigger maps to the built-in, so it serves on this schema while the migration runs."
+    },
+    "0081_roles_are_permission_sets_contract.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds agent_holds(agent, permission), executable by infra_worker only; drops agents.role's CHECK and NOT NULL, leaving the column as history; and redefines under their existing signatures, grants and SECURITY mode: approve_task_review, request_revision, request_implementation and invoke_delegate_task, whose questions of an agent's own word now ask what an enabled assignment of the agent permits; create_project_with_roster, which writes the built-in definitions and no agent word; validate_project_agent_assignment, which keeps only its runtime check; and guard_assignment_role, which asks runtime_plays by the definition's permissions. assignment_role stays as the definition's projection, kept by 0079's trigger, which still maps a word written by an older writer to its built-in. The previous release calls the same functions and its writers' words map as before, so it serves on this schema while the migration runs; role-equivalence.test.mjs is identical from 0078 to 0081."
+    },
+    "0082_connection_kinds.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds provider_connections.connection_kind, generated from provider (scm for GitHub, model_access otherwise), with a unique key on (id, kind) and a CHECK for each kind's shape; the migration stops, naming them, if a connection fits neither. Every table that refers to a connection gains a generated constant column naming the kind it refers to, and a foreign key on (connection, kind): provider_model_catalog, catalog_refresh_jobs, catalog_gate_allowlist, model_verification_receipts and provider_secret_enrollments to model_access; projects, provider_installation_repositories and github_clone_authorizations to scm; provider_login_sessions by its provider. No function changes and no writer names the new columns, so the previous release writes the same rows; the only rows now refused are ones pairing a connection with the wrong kind, which it never writes."
+    },
+    "0083_vendor_gateway_billing.sql": {
+      "previousReleaseCompatible": false,
+      "note": "Adds access_gateway to provider_connections (model-access only; opencode_zen, opencode_go, openrouter, openai_chatgpt), to provider_model_catalog (always the connection's, set by a trigger) and to provider_secret_enrollments (replacing its billing_boundary column), and model_vendor to the catalog; moves billing_boundary to free/subscription/direct_metered/third_party_metered everywhere, backfilling go and chatgpt_subscription to subscription and external_api to third_party_metered; replaces the per-boundary OpenCode CHECKs and unique indexes with per-gateway ones; and redefines 15 functions to name the gateway where they named a boundary. Declared incompatible: the previous release's OpenCode account and catalog workers choose the provider they sign in to by the old boundary words, which no longer exist, so the coordinator stops every service before the runner. start_opencode_enrollment still accepts the old words go and external_api, so the previous panel's request maps to the same gateway. An application-only rollback is not a rollback once the words have moved."
+    },
+    "0084_revocation_at_dispatch.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds the failure reason model_access_revoked and two functions: job_model_connection, the connection the task's snapshot records for the job's model, and revoked_model_access, which reads that connection under a share lock and names it when it is gone, not connected, or asked to be disconnected. claim_executor_jobs and claim_orchestrator_jobs become PL/pgSQL, claiming one job at a time and ending a job whose connection is revoked in the same transaction instead of returning it; record_runtime_dispatch refuses such a launch; retry_runtime_job ends it rather than retrying it; retry_dead_letter_job refuses to put it back. Signatures and results are unchanged, and a job whose task has no catalog snapshot is not asked, so the previous release's workers claim, launch and report exactly as before, and meet the new reason only as a dead letter or a refusal they already handle."
+    },
+    "0085_publish_path.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds publish_intents (one per prepared publish: the commit, the task's branch, the base branch, the repository and its GitHub connection, a lease, the push and pull-request receipts, a failure reason from the vocabulary; immutable once published), eleven failure reasons, and the functions of the publish path: request_publish and retry_publish_intent for infra_web, which check the owner; claim_publish_intent, publish_export_target, record_publish_push, complete_publish_intent and fail_publish_intent for infra_worker. No existing function, table or column changes, and nothing writes an intent but the new web action, so the previous release runs unchanged and never meets one."
+    },
+    "0086_publish_web_reads.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Grants infra_web SELECT on publish_preparations and publish_intents, which the panel's publish card reads. Only a grant; nothing the previous release reads or writes changes."
+    },
+    "0087_operator_revision_enters_the_contract.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds tasks.operator_change_requests (a list, default empty) and request_revision_from, the body of request_revision with a ninth argument naming who asked; request_revision keeps its signature, grant and result and calls it as the operator, invoke_request_revision calls it as the agent, and orchestrator_job_context returns one more key. The previous release's panel calls request_revision with the same eight arguments and gets the same result; its worker calls invoke_request_revision and orchestrator_job_context with the same arguments and ignores the key it does not know; its changes.requested events differ by one payload key nobody reads."
+    },
+    "0088_project_readiness.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds project_readiness (infra_web, owner-checked) and the helpers it shares with dispatch: runtime_health_reading and connection_revoked, over which runtime_undispatchable_reason and revoked_model_access are redefined with the same answers; dispatch_prerequisites and assert_dispatch_prerequisites; readiness_action; two failure reasons (runtime_readiness_unknown, model_not_verified). capture_task_runtime_snapshot and record_task_chat_message keep their signatures, grants and results and refuse one case more each, by reason, where the previous release's panel would have shown a generic error or made a turn that dead-lettered: a task cannot be created, and a message cannot start a turn, when the orchestrator's or a bound executor's runtime is unreported, uninstalled or signed out, its default model is unverified, or its connection is revoked. No table or column changes."
+    },
+    "0089_project_team.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds project_team (the Team tab's read) and add_project_executor, change_project_assignment_model and disable_project_executor for infra_web, each owner-checked, checked against and bumping project_runtime_defaults.version, and audited as project.team_changed; five failure reasons; and private helpers for the team lock and the executor/default positions. No table, column or existing function changes: the previous release reads the same assignments and defaults, and a team changed through the new functions is a shape it already builds snapshots from."
+    },
+    "0090_close_task.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds close_task for infra_web (owner- and version-checked, audited as task.closed) and three failure reasons (task_already_closed, task_work_in_flight, task_closed). It moves a task to 'cancelled', a status the previous release already reads as closed everywhere, ends the task's pending jobs through end_runtime_job and marks its dead letters handled, which the previous release shows as it shows any handled dead letter. No table, column or existing function changes."
+    },
+    "0091_claude_orchestrator.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Widens CHECK constraints to admit the runtime claude, the provider claude, the gateway claude_subscription and the discovery source claude_aliases, and adds one constraint that applies only to claude connections; adds (claude, orchestrator) and claude's capabilities to the role mirror; redefines append_runtime_activity_event, ensure_structural_runtime_profile, request_catalog_refresh, upsert_catalog_entries, fill_connection_gateway and catalog_model_vendor with the same signatures and the same answers for every existing runtime; adds get_operator_claude_connection, connect_claude_connection and disconnect_claude_connection for infra_web and one failure reason. The previous release never writes claude, and reads nothing it would misread."
+    },
+    "0092_runtime_capacity.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Redefines defer_runtime_job with the same signature: it accepts one more reason, runtime_capacity, which only the new supervisor raises, says so in the queued job's detail, and names its refusals' reasons in DETAIL as JSON where they were a bare word. Adds four failure reasons. The previous release's worker defers only for grant_writer_active and runtime_paused, which behave as before, and never matches on the DETAIL text."
+    },
+    "0093_catalog_refresh_on_reconnect.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds an AFTER UPDATE OF status trigger on provider_connections that queues a catalog_refresh_jobs row (reason 'reconnected') when a model-access connection returns to connected and none is waiting. The previous release's refresh worker claims such a row as it claims any other; no table, column or existing function changes."
+    },
+    "0094_runtime_defaults_read_survives_unavailable_model.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds describe_runtime_default_entry and redefines get_project_runtime_defaults (same signature, still SECURITY DEFINER) to describe an unavailable saved model instead of raising. Only the read changes: the previous release calls the function the same way and reads the same keys, plus 'available' and 'reason' it ignores; saving and snapshot capture are untouched."
+    },
+    "0095_runtime_versions.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds runtime_versions and runtime_watch_state with record_runtime_watch (infra_worker) and get_runtime_versions (infra_web). New tables and functions only; the previous release never calls them, and nothing existing changes."
+    },
+    "0096_runtime_qualifications.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds runtime_qualifications and runtime_qualification_checks with begin/record/finish functions (infra_worker) and get_runtime_qualifications (infra_web). New tables and functions only; nothing existing changes."
+    },
+    "0097_runtime_activations.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds runtime_activations with record_runtime_activation (infra_worker) and get_runtime_activations (infra_web). New table and functions only; nothing existing changes."
+    },
+    "0098_stable_catalog_identity.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Changes provider_model_catalog's identity from (connection, provider, model, adapter version, runtime version) to (connection, provider, model): adds superseded_by, pinned_at and resolved_model, and model_listings (which runtime versions list a model, with first and last seen). Collapses rows duplicated by version into the row project defaults name, else the most recently verified, else the newest; that row takes the state of the row the last refresh wrote, defaults and verification receipts are repointed to it, and the others are kept as unavailable with superseded_by, never deleted; the new unique index (ignoring superseded rows) is created last. catalog_gate_allowlist rows become pins, and two triggers keep pinned_at and resolved_model following the allowlist and passed receipts until W6. upsert_catalog_entries, get_operator_model_catalog and get_operator_catalog_refresh_status keep their signatures, grants and result keys: the upsert finds the row by the new identity, records a listing for the version it read, and marks nothing stale ('stale_marked' is always 0); the two reads leave superseded rows out. The previous release calls the same functions with the same arguments and reads status as before; the only difference it can see is that a model seen at a new runtime version keeps its row and its status instead of going stale."
+    },
+    "0099_model_checks.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds model_checks (one row per model check, its result written once), runtime_active_versions (the version each runtime runs, noted from the health report, the watch and activations), provider_connections.credential_generation (bumped by a return to connected, a completed OpenCode enrollment and a consumed Codex login) and provider_model_catalog.last_check_id. model_eligibility() is the one definition of a selectable model; triggers keep status as its projection (verified iff eligible) for rows a check has judged, and leave rows no check has judged as their writer set them. Backfills: listings with no recorded version go to the active version, every verified and rejected row becomes a legacy check at the version it was judged at, promotions already recorded in runtime_activations get the same carry as new ones (listings of the version left listed at the new one, and a qualification check for the in-use models it re-checked), gates in flight return to discovered; backfill_model_checks() reports what stops being selectable. catalog_listing_version falls back to the active version. The previous release reads status, calls the same catalog functions with the same arguments and sees the same keys; its gate worker keeps working through the 0102 wrappers."
+    },
+    "0100_model_check_lane.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds the check lane: request_model_check (infra_web), claim_model_checks, complete_model_check, defer_model_check, request_model_checks_due, record_run_model_failure (infra_worker), and internal helpers; triggers queue automatic checks after a completed refresh and a new credential, and ask for a refresh and one re-check when a runtime job's last_error is a model-class failure. Waiting gate requests become pin checks. New functions and triggers only; nothing the previous release calls changes signature."
+    },
+    "0101_model_checks_operator.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds the panel's reads and actions for model checks (docs/W6_W7_CONTRACT.md): get_operator_models, search_operator_model_catalog, pin_model, unpin_model, get_model_check (infra_web), with internal helpers. New functions only."
+    },
+    "0102_catalog_gate_wrappers.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Redefines request_catalog_verification, claim_catalog_verifications, complete_/fail_/defer_catalog_verification and gate_quota_available as wrappers over the check lane, with the same signatures, grants and result keys. A request pins and asks for a pin check instead of requiring the allowlist; the claim hands out at most one check at a time with the check id as verification_id; completion records the check's verdict (no new receipt). The previous release's gate worker keeps working against them, one check at a time."
+    },
+    "0104_runtime_probation.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds probation columns to runtime_activations (opened by a trigger on promote, closed by the next activation), runtime_dispatch_failure_class, runtime_probation_verdict and end_runtime_probation (infra_worker); get_runtime_activations gains a probation key. The previous release inserts activations the same way and reads the same keys."
+    },
+    "0105_catalog_polish.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds runtime_baselines (the release baseline and what verifies the active version, written by the redefined health trigger from the snapshot's new keys), provider_model_catalog.observed_model/observed_model_at, the model check trigger 'relisted', and internal functions (runtime_version_key, runtime_catalog_preview, connection_catalog_preview, runtime_job_catalog_entry, record_alias_resolution, model_state) with two triggers: a dispatch attempt whose native_result carries resolved_model notes it and queues an alias_drift check when it differs from the last passed check's, and a rejected model a refresh names again queues one relisted check. Redefines with the same signatures and every existing key: get_runtime_versions (+baseline_version, verified_by; also lists a runtime the health report named before the watch ran), get_runtime_qualifications (+catalog), get_operator_models (+budget; per connection +vendors, rollup, newer_runtime), model_row (+alias_drift; resolved_model falls back to what runs report), request_model_check (+result, failure_class, reason, retry_at), queue_model_check (accepts relisted) and complete_catalog_refresh, which now also marks a rejected model its list no longer names unavailable. The previous release reads the same keys and ignores the new ones; its supervisor reports no resolved_model and its health snapshot no baseline, so neither trigger does anything for it. Nothing that is selectable changes."
+    },
+    "0106_catalog_contract.sql": {
+      "previousReleaseCompatible": true,
+      "note": "W5-b, the contract step. Converts rows still 'stale' or 'verifying' to 'discovered' (neither was selectable) and pins any allowlisted model not yet pinned, then drops request_catalog_gate_allowlist, request_catalog_verification, claim_catalog_verifications, complete_/fail_/defer_catalog_verification, gate_quota_available, backfill_catalog_identity, backfill_model_checks, catalog_gate_allowlist with its pin trigger, and the receipt trigger that copied a resolved alias; revokes infra_worker's grants on held_model_check and model_check_usage, which only the wrappers used; drops 'stale' and 'verifying' from provider_model_catalog's status and the two constraints that named 'verifying'. pin_model, unpin_model, get_operator_model_catalog ('allowlisted' is the pin), complete_catalog_refresh ('stale' asked for is written as 'unavailable') and mark_catalog_unavailable_on_connection_change keep their signatures and keys. The previous release (rc.89) calls none of the dropped functions on a path it reaches with get_operator_models present: its check worker claims from the lane, its panel pins and asks for checks, and its old catalog card and its 'verify' action are rendered only when get_operator_models is missing. Only a browser tab still showing the pre-W7 card would get an error from that action. Its refresh worker passes 'unavailable', and its health snapshot's counts of 'stale' and 'verifying' rows read 0. The NOTICE names what was converted and dropped, any model that stops being selectable (none is expected) and any team model that is not verified."
+    },
+    "0110_catalog_reasoning_levels.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds provider_model_catalog.reasoning_levels and default_reasoning_effort, claude_reasoning_levels (Claude Code's documented effort table by resolved model) and a BEFORE INSERT/UPDATE trigger that reduces reasoning_efforts, whether names or {level, description, default} objects, to the list of names it always held, plus the two new columns; Claude rows take the table's answer for their resolved_model. Backfills every row through the trigger. upsert_catalog_entries is unchanged: the previous release's worker keeps writing names (the trigger keeps known descriptions and defaults for them) and every reader of reasoning_efforts still sees a list of strings."
+    },
+    "0111_team_reasoning_levels.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds project_runtime_default_executors.reasoning_effort ('' = runtime default) and runtime_job_selections.reasoning_effort (nullable). Recreates set_project_runtime_defaults, add_project_executor and change_project_assignment_model with one trailing defaulted argument each (dropped and re-created, grants restored), so the previous release's calls with the old arguments resolve to them and mean what they meant; a model change without a level keeps it only if the new model lists it. Redefines get_project_runtime_defaults (adds keys), capture_task_runtime_snapshot (a level the model no longer lists falls back to the default and is kept as reasoning_effort_dropped instead of refusing the task), resolve_executor_launch_model (adds reasoning_effort) and record_runtime_dispatch (records p_launch.reasoning_effort, which the previous release does not send, so its launches are recorded with none, which is what they ran). Adds set_project_assignment_reasoning and project_team_reasoning (infra_web) and the reason reasoning_effort_unsupported."
+    },
+    "0113_usage_and_limits.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds provider_usage_readings and run_usage, two failure reasons, the cleaning and recording functions (record_provider_usage_reading, codex_usage_reads_due and record_model_check_usage for infra_worker) and two AFTER triggers: one on runtime_dispatch_attempts (opens and closes a run's usage row) and one on runtime_activity_events for runtime.turn.usage, runtime.usage.updated and runtime.limits.updated. The triggers catch their own errors and only warn, so the previous release's dispatch and activity writes succeed as before; its Claude and OpenCode usage events are counted from then on. No existing table, function or grant changes."
+    },
+    "0114_usage_web_reads.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds the panel's read-only get_operator_usage_limits and get_task_usage (infra_web, in 0026's allowlist) and their helpers. New functions only; the previous release's panel does not call them."
+    },
+    "0116_codex_default_effort.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds catalog_default_reasoning (infra_worker): a model's default reasoning level, which a Codex orchestrator at Default now sends explicitly because Codex keeps a turn's effort for later turns. New function only."
+    },
+    "0117_opencode_go_usage_probe.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Lets a usage reading carry the error class not_subscribed (the OpenCode Go probe's answer to a key without Go, ADR-0019) and adds opencode_go_usage_reads_due (infra_worker). The previous release never writes that class and does not call the new function."
+    },
+    "0118_catalog_reasoning_default_kept.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Redefines upsert_catalog_entries (same signature, grants and result) so an update also takes reasoning_levels and default_reasoning_effort, and the reasoning trigger so plain names on an update keep the row's levels and default. rc.89/rc.92 callers are unchanged."
+    },
+    "0120_project_rename_archive.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds rename_project, archive_project and unarchive_project (infra_web) and four failure reasons. Uses the 'archived' status and archived_at column 0001 declared, which every lifecycle check already refuses. The previous release never calls them; a project it sees as archived it already hides."
+    },
+    "0121_one_executor_per_request.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Redefines create_project_with_roster under the same signature, security and grants to make one executor per requested element (two of one runtime were collapsed into one), and adds the missing executor assignments to projects whose defaults name more executors than they have. The previous release reads executors through project_executor_positions and simply sees the restored ones."
+    },
+    "0122_claude_executor.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds the rows ('claude','executor') to runtime_roles and run.workspace_write and tools.worker_report to Claude's runtime_capabilities. The previous release's implementation worker picks its runtime by job type and would refuse a Claude executor job; none can exist before this release lets the panel create one."
+    },
+    "0123_codex_executor.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds ('codex','executor') to runtime_roles and run.workspace_write and tools.worker_report to Codex's runtime_capabilities. No Codex executor job can exist before this release lets the panel choose one."
+    },
+    "0124_commit_identity.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds the table github_app_identity and the functions record_github_app_identity and commit_identity_for. The previous release reads none of them."
+    },
+    "0125_github_app_manifest.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds the table github_app_manifests and its functions. The previous release reads none of them and keeps configuring the GitHub App from env files."
+    },
+    "0126_publish_to_empty_repository.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds publish_intents.initialised_base_ref, widens the published-receipt check to accept it in place of a pull request, and adds complete_publish_as_base. The previous release never sets the column and keeps publishing only through pull requests."
+    },
+    "0127_runtime_updates_from_the_panel.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds runtime_update_requests and its functions, and redefines get_runtime_versions to offer a version from its publication. The previous release reads get_runtime_versions with the same shape and never reads the new table."
+    },
+    "0128_listing_at_the_active_version.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Redefines catalog_listing_version to prefer the active runtime version over the reported one; same signature and result type."
+    },
+    "0129_claude_model_list.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Widens provider_model_catalog's discovery_source check and upsert_catalog_entries to admit anthropic_models. The previous release never writes that source and reads the rows like any other."
+    },
+    "0130_claude_catalog_refresh.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Redefines request_catalog_refreshes_due to schedule every model-access connection, Claude's included; same signature."
+    },
+    "0131_task_change_counts.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Grants infra_web SELECT on review_evidence's count columns (task_id, project_id, recorded_at, diffstat); no schema change."
+    },
+    "0132_issue_intake.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds issue_intake_settings and issue_links with their functions; nothing existing changes."
+    },
+    "0133_issue_feedback.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds comment columns to issue_links and the comment outbox functions; nothing existing changes."
+    },
+    "0134_waiting_issues_count.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Grants infra_web SELECT on issue_links.status and issue_intake_settings(project_id, enabled); no schema change."
+    }
+  }
+}

@@ -1,0 +1,39 @@
+[Unit]
+Description=infra_cod self-hosted control plane
+# One handle for the whole stack: `systemctl start|stop|restart infra-cod.target`.
+#
+# Every member declares PartOf= this target, which is what makes the stop and
+# restart propagate. The target itself only pulls members in: `Wants=` rather than
+# `Requires=`, because one worker failing to start must not make the unit graph
+# refuse to bring up the panel. Ordering between members is declared where it is
+# actually needed (PostgreSQL before its clients, the supervisor socket before the
+# workers that call it) instead of as a total order here.
+Wants=infra-cod-runtime-supervisor.service
+Wants=infra-cod-dispatcher.service
+Wants=infra-cod-reconciler.service
+Wants=infra-cod-web.service
+Wants=infra-cod-orchestrator-worker.service
+Wants=infra-cod-implementation-worker.service
+Wants=infra-cod-github-app-worker.service
+Wants=infra-cod-codex-account-worker.service
+Wants=infra-cod-opencode-account-worker.service
+Wants=infra-cod-catalog-refresh-worker.service
+Wants=infra-cod-catalog-gate-worker.service
+Wants=infra-cod-project-provisioner.service
+Wants=infra-cod-project-deprovision-worker.service
+Wants=infra-cod-caddy.service
+Wants=infra-cod-backup.timer
+Wants=infra-cod-health.timer
+Wants=infra-cod-restore-drill.timer
+Wants=infra-cod-runtime-watch.timer
+Wants=infra-cod-runtime-probation.timer
+Wants=infra-cod-runtime-update.timer
+
+# The database is a prerequisite, not a member: it is installed and started by
+# Stage 2 and by the distribution package, and the control plane attaches to it.
+After=network-online.target postgresql@17-main.service
+Wants=network-online.target
+Wants=postgresql@17-main.service
+
+[Install]
+WantedBy=multi-user.target

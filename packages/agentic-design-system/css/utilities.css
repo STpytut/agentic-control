@@ -1,0 +1,63 @@
+/* Brand behaviours that are not a single token: the underline reveal, the
+   scroll reveal and the accent highlighter. */
+
+@layer utilities {
+  /* A 36px control is right for a mouse and too small for a thumb. Rather than
+     grow every control everywhere, the minimum applies only where the pointer
+     is coarse. min-height wins over a fixed height, so h-9 becomes 44px on a
+     phone and stays 36px on a desktop. */
+  @media (pointer: coarse) {
+    .touch-target {
+      min-height: 44px;
+    }
+  }
+
+  .link-underline {
+    background-image: linear-gradient(currentColor, currentColor);
+    background-size: 0% 1px;
+    background-position: 0 100%;
+    background-repeat: no-repeat;
+    transition: background-size var(--duration-slow) var(--ease-out);
+  }
+
+  .link-underline:hover,
+  .link-underline:focus-visible {
+    background-size: 100% 1px;
+  }
+
+  /* Accent marker behind a heading, grown on hover of the nearest .group. */
+  .highlight-accent {
+    background-image: linear-gradient(var(--color-accent), var(--color-accent));
+    background-size: 0% 38%;
+    background-position: 0 88%;
+    background-repeat: no-repeat;
+    transition: background-size 500ms var(--ease-out);
+  }
+
+  .group:hover .highlight-accent,
+  .highlight-accent[data-active="true"] {
+    background-size: 100% 38%;
+  }
+
+  /* Scroll reveal — opt-in through <Reveal>, disabled under reduced motion. */
+  .reveal {
+    opacity: 0;
+    transform: translateY(18px);
+    transition:
+      opacity var(--duration-reveal) var(--ease-out),
+      transform var(--duration-reveal) var(--ease-out);
+    transition-delay: var(--reveal-delay, 0ms);
+  }
+
+  .reveal[data-visible="true"] {
+    opacity: 1;
+    transform: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .reveal {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}

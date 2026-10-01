@@ -1,0 +1,55 @@
+@import "tailwindcss";
+/* @agentic/design-system (packages/agentic-design-system, see its VENDOR.json),
+   through its Tailwind entry: its fonts, its theme and tokens (light and
+   [data-theme="dark"]), base.css (body, headings, focus, selection, reduced
+   motion) and its brand utilities, with its components' sources scanned. */
+@import "@agentic/design-system/tailwind.css";
+
+/* The panel's widths: `tablet:` at 1080px, `phone:` at 760px, where it switches
+   to the tab bar, and `narrow:` at 480px. Inclusive (Tailwind's max-[1080px]
+   is `width < 1080px`), and declared widest first: a later variant's rules come
+   later, so the narrower width wins where both apply. */
+@custom-variant tablet (@media (max-width: 1080px));
+@custom-variant phone (@media (max-width: 760px));
+@custom-variant narrow (@media (max-width: 480px));
+
+/* Tailwind v4's preflight gives buttons the default cursor; the panel's
+   buttons have always shown the pointer, and a disabled one does not. */
+@layer base {
+  button:not(:disabled), [role="button"]:not([aria-disabled="true"]), summary { cursor: pointer; }
+}
+
+/* The top bar every page renders inside the shell: 60px, a hairline and
+   translucent canvas; the breadcrumbs keep only the current page on a phone. */
+.cp-topbar { position: sticky; top: 0; z-index: 20; height: 60px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 28px; border-bottom: 1px solid var(--color-line); background: color-mix(in srgb, var(--color-canvas) 88%, transparent); backdrop-filter: blur(16px); }
+.cp-breadcrumbs { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--color-muted); font-size: 0.8125rem; line-height: 1.45; }
+.cp-breadcrumbs a { color: var(--color-muted); text-decoration: none; transition: color var(--duration-fast) var(--ease-out); }
+.cp-breadcrumbs a:hover { color: var(--color-ink); }
+.cp-breadcrumbs strong, .cp-breadcrumbs b { overflow: hidden; color: var(--color-ink); text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+@media (max-width: 760px) {
+  .cp-topbar { height: 57px; padding: 0 14px 0 56px; }
+  .cp-breadcrumbs a, .cp-breadcrumbs > span { display: none; }
+}
+
+/* The navigation progress bar's sweep (navigation-progress.tsx). */
+@keyframes navigation-progress { from { transform: translateX(-110%); } to { transform: translateX(310%); } }
+
+/* An agent's reply is Markdown rendered by react-markdown, whose elements take
+   no className; this is its typography, on the design system's tokens. */
+.message-markdown { margin-top: 4px; color: var(--color-ink); font-size: .9375rem; line-height: 1.6; overflow-wrap: anywhere; }
+.message-markdown > :first-child { margin-top: 0; }
+.message-markdown > :last-child { margin-bottom: 0; }
+.message-markdown :is(p,ul,ol,pre,blockquote,table) { margin: 8px 0; }
+.message-markdown :is(ul,ol) { padding-left: 22px; }
+.message-markdown ul { list-style: disc; }
+.message-markdown ol { list-style: decimal; }
+.message-markdown li + li { margin-top: 3px; }
+.message-markdown :is(h1,h2,h3,h4) { margin: 14px 0 6px; font-family: var(--font-display); font-size: 1rem; font-weight: 500; letter-spacing: -.025em; color: var(--color-ink); }
+.message-markdown strong { font-weight: 600; }
+.message-markdown code { padding: 1px 4px; border-radius: var(--radius-xs); background: var(--color-wash); font-family: var(--font-mono); font-size: .8125rem; }
+.message-markdown pre { overflow-x: auto; padding: 12px; border-radius: var(--radius-md); color: var(--palette-paper); background: var(--palette-ink-800); font-family: var(--font-mono); font-size: .8125rem; line-height: 1.55; }
+.message-markdown pre code { padding: 0; color: inherit; background: transparent; }
+.message-markdown blockquote { padding-left: 12px; border-left: 2px solid var(--color-line-strong); color: var(--color-muted); }
+.message-markdown a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.message-markdown table { border-collapse: collapse; font-size: .8125rem; }
+.message-markdown :is(th,td) { padding: 4px 8px; border: 1px solid var(--color-line); text-align: left; }

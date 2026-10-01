@@ -1,0 +1,34 @@
+[Unit]
+Description=infra_cod project workspace provisioner
+After=network-online.target postgresql@17-main.service infra-cod-runtime-supervisor.service
+Wants=network-online.target
+Wants=postgresql@17-main.service
+
+PartOf=infra-cod.target
+
+[Service]
+Type=simple
+User=infra-control
+Group=infra-control
+WorkingDirectory=/opt/infra-cod/current
+Environment=CONTROL_PLANE_DB=infra_cod
+EnvironmentFile=-/etc/infra-cod/database.env
+Environment=PGUSER=infra_worker
+Environment=PROJECT_WORKSPACE_ROOT=/srv/infra-cod/workspaces
+Environment=PROJECT_PROVISIONER_POLL_MS=60000
+ExecStart=/opt/node/bin/node /opt/infra-cod/current/services/control-plane/project-provisioner.mjs
+Restart=on-failure
+TimeoutStopSec=20
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+LockPersonality=true
+MemoryDenyWriteExecute=false
+TasksMax=64
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target
