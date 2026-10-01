@@ -468,6 +468,14 @@ jobs:
           name: verified-release
           path: verified
 
+      # The one-command installer is a release asset, so that
+      # releases/latest/download/get.sh is always the script of the latest release.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          path: src
+          sparse-checkout: deploy/get.sh
+          sparse-checkout-cone-mode: false
+
       - name: publish
         uses: softprops/action-gh-release@da05d552573ad5aba039eaac05058a918a7bf631 # v2.2.2
         with:
@@ -475,4 +483,5 @@ jobs:
             verified/infra-cod-*.tar.gz
             verified/SHA256SUMS
             verified/SHA256SUMS.minisig
+            src/deploy/get.sh
           fail_on_unmatched_files: true

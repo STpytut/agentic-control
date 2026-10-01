@@ -366,9 +366,27 @@ block_end() { write_state "$(( $1 + 1 ))" 0; }
 
 usage() { cat <<'USAGE'; exit 0
 Usage: install.sh --artifact <tarball> --checksums <file> --signature <file>
-       --public-key <file> --domain <name> --acme-email <email>
+       --public-key <file> --acme-email <email> [--domain <name>]
+Without --domain: the domain this host already has, or else <public-ip>.sslip.io.
 Modes: --check --dry-run --resume --json --help
 USAGE
+}
+
+# The domain when none is given. A host that already has one keeps it: running
+# the installer again without --domain must not move a live panel to another
+# name. A new host gets <public-ip>.sslip.io, a public name that resolves to
+# that address, so a first install needs no DNS record and still gets a real
+# certificate. Behind NAT the address is private and there is no such name.
+default_domain() {
+  local recorded ip
+  recorded=$(env_value "${ETC_ROOT}/caddy.env" INFRA_COD_DOMAIN)
+  if [[ -n ${recorded} ]]; then printf '%s\n' "${recorded}"; return 0; fi
+  ip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") { print $(i + 1); exit }}')
+  [[ ${ip} =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "--domain required: this host's address could not be read"
+  if [[ ${ip} =~ ^(10\.|127\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.) ]]; then
+    die "--domain required: this host's address ${ip} is private, so <ip>.sslip.io would not reach it"
+  fi
+  printf '%s.sslip.io\n' "${ip//./-}"
 }
 
 parse_args() {
@@ -394,7 +412,9 @@ parse_args() {
     [[ -n ${CHECKSUMS} && -f ${CHECKSUMS} ]] || die "--checksums required"
     [[ -n ${SIGNATURE} && -f ${SIGNATURE} ]] || die "--signature required"
     [[ -n ${PUBLIC_KEY} && -f ${PUBLIC_KEY} ]] || die "--public-key required"
-    [[ -n ${DOMAIN} ]] || die "--domain required"
+    # default_domain runs in a subshell: its die ends only that, so its status is checked here.
+    if [[ -z ${DOMAIN} ]]; then DOMAIN=$(default_domain) || exit 1; fi
+    [[ -n ${ACME_EMAIL} ]] || ACME_EMAIL=$(env_value "${ETC_ROOT}/caddy.env" INFRA_COD_ACME_EMAIL)
     [[ -n ${ACME_EMAIL} ]] || die "--acme-email required"
     # Both values are written into environment files that systemd and Caddy
     # parse line by line. A newline in either would inject a second variable, and

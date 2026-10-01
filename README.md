@@ -62,35 +62,55 @@ reviewed pull request, including issues #3, #5 and #7.
 
 - Ubuntu 24.04 on x86-64, with root access, at least 2 GB RAM, 10 GB free disk
   and ports 80, 443 and 3100 free.
-- A domain whose A record points at the server before installation. Caddy needs
-  it to obtain a TLS certificate.
+- Optionally, a domain whose A record points at the server. Without one, the
+  panel uses `<server-ip>.sslip.io`.
 - Your own accounts for the agents you want to use. For example, a ChatGPT plan
   for Codex, a Claude plan for Claude Code, or a model provider of your choice
   for OpenCode.
 
 ## Install
 
-The scripts and the public key come from this repository at a release tag. The
-artifact comes from that tag's GitHub release. Every artifact is verified in
-this order before anything is unpacked: the minisign signature, the checksum,
-then the archive's member list.
+On a clean Ubuntu 24.04 server:
+
+```bash
+curl -fsSL https://github.com/STpytut/agentic-control/releases/latest/download/get.sh \
+  | sudo sh -s -- --email you@example.com
+```
+
+Without `--domain`, the panel is served at `https://<server-ip>.sslip.io`. That
+name resolves to your server's address, so you don't need a DNS record and you
+still get a real certificate. Add `--domain panel.example.com` to use your own
+domain; its A record must point at the server first. To install a specific
+version, add `--version 0.4.0-rc.122`. To check the host without changing
+anything, add `--check`.
+
+[`get.sh`](deploy/get.sh) is the only code that runs before a signature is
+checked, and it is short enough to read first:
+
+1. It downloads the release.
+2. It verifies the minisign signature over `SHA256SUMS` with the release key
+   written into the script.
+3. It checks the tarball's checksum.
+4. It runs the installer from inside the verified tarball. The installer
+   verifies the signature again.
+
+<details>
+<summary>The same steps by hand</summary>
 
 ```bash
 git clone --depth 1 --branch <tag> https://github.com/STpytut/agentic-control.git
 cd agentic-control
 gh release download <tag> --dir /tmp/rel
 
-# Checks the host and changes nothing
-sudo ./deploy/install.sh --check --domain panel.example.com --acme-email you@example.com
-
 sudo ./deploy/install.sh \
   --artifact /tmp/rel/infra-cod-<version>-linux-x64.tar.gz \
   --checksums /tmp/rel/SHA256SUMS \
   --signature /tmp/rel/SHA256SUMS.minisig \
   --public-key release/keys/infra-cod-release.pub \
-  --domain panel.example.com \
-  --acme-email you@example.com
+  --acme-email you@example.com [--domain panel.example.com]
 ```
+
+</details>
 
 The installer is idempotent. It sets up PostgreSQL, Caddy, the pinned Node,
 systemd units and a separate OS user for each agent runtime. The owner's first

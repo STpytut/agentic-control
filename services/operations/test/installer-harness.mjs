@@ -633,15 +633,15 @@ esac
       rmSync(base, { recursive: true, force: true });
     },
 
-    run(extraArgs = [], { env = {} } = {}) {
+    // `site: false` leaves out --domain and --acme-email, as a re-run may.
+    run(extraArgs = [], { env = {}, site = true } = {}) {
       const args = [
         INSTALLER,
         "--artifact", tarball,
         "--checksums", checksums,
         "--signature", signature,
         "--public-key", publicKey,
-        "--domain", "panel.example.test",
-        "--acme-email", "ops@example.test",
+        ...(site ? ["--domain", "panel.example.test", "--acme-email", "ops@example.test"] : []),
         ...extraArgs,
       ];
       return spawnSync("bash", args, {
