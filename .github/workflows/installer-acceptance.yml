@@ -64,14 +64,14 @@ jobs:
       - name: Create the accounts the units run as
         run: |
           set -euo pipefail
-          for g in infra-web infra-control infra-cod-github agent-workspace opencode-worker caddy codex-poc; do
+          for g in infra-web infra-control infra-cod-github agent-workspace opencode-worker caddy codex-worker claude-worker; do
             getent group "${g}" >/dev/null || sudo groupadd --system "${g}"
           done
           for u in infra-web infra-control infra-cod-github caddy; do
             getent passwd "${u}" >/dev/null || sudo useradd --system --gid "${u}" \
               --home-dir "/var/lib/${u}" --shell /usr/sbin/nologin "${u}"
           done
-          for u in codex-poc opencode-worker; do
+          for u in codex-worker opencode-worker claude-worker; do
             getent passwd "${u}" >/dev/null || sudo useradd --system --gid "${u}" \
               --create-home --shell /usr/sbin/nologin "${u}"
           done
@@ -86,7 +86,7 @@ jobs:
           sudo systemd-tmpfiles --create 2>&1 | tee "${RUNNER_TEMP}/tmpfiles.log" || true
           echo "::group::what tmpfiles did"
           cat "${RUNNER_TEMP}/tmpfiles.log"
-          sudo ls -laR /home/opencode-worker /home/codex-poc || true
+          sudo ls -laR /home/opencode-worker /home/codex-worker /home/claude-worker || true
           echo "::endgroup::"
           # The paths the runtime supervisor names in ReadWritePaths and
           # ReadOnlyPaths. systemd resolves these while building the unit's mount
@@ -95,9 +95,9 @@ jobs:
           # Under sudo, because these live inside 0700 directories owned by the
           # runtime users: an unprivileged `test -d` on a path it cannot traverse
           # answers "no", which is not the same fact as "it is missing".
-          for path in /home/codex-poc/.codex /home/opencode-worker/.local \
+          for path in /home/codex-worker/.codex /home/claude-worker/.claude /home/opencode-worker/.local \
               /home/opencode-worker/.config/opencode/tools \
-              /srv/infra-cod-handoff-poc/workspaces /srv/infra-cod-handoff-poc/gate-smoke \
+              /srv/infra-cod/workspaces /srv/infra-cod/gate-smoke \
               /etc/infra-cod/github-deploy-keys /etc/infra-cod/github-app; do
             sudo test -d "${path}" || { echo "::error::${path} was not created"; exit 1; }
             sudo ls -ld "${path}"
@@ -356,12 +356,12 @@ jobs:
       - name: Agent runtimes are reported, not assumed
         run: |
           set -euo pipefail
-          jq -e '[.checks[] | select(.check | startswith("runtime.agent_cli."))] | length == 2' \
+          jq -e '[.checks[] | select(.check | startswith("runtime.agent_cli."))] | length == 3' \
             < "${RUNNER_TEMP}/doctor.json"
           jq -r '.checks[] | select(.check | startswith("runtime.agent_cli.")) | "\(.check): \(.severity) — \(.message)"' \
             < "${RUNNER_TEMP}/doctor.json"
           # Whatever the runtime users can see is what the supervisor will exec.
-          for user in codex-poc opencode-worker; do
+          for user in codex-worker opencode-worker claude-worker; do
             echo "--- ${user} ---"
             sudo runuser -u "${user}" -- env PATH=/usr/local/bin:/usr/bin:/bin sh -c \
               'command -v codex || echo "codex: not installed"; command -v opencode || echo "opencode: not installed"'
