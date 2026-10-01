@@ -106,7 +106,10 @@ BEGIN
   IF v_message.id IS NULL OR v_message.attempt_count <> 1 THEN
     RAISE EXCEPTION 'dispatcher did not claim the pending outbox message';
   END IF;
-  SELECT count(*) INTO v_count FROM claim_outbox('dispatcher-b', 1, interval '30 seconds');
+  -- Only the leased message is the question. In CI the integration suites run
+  -- first against the same database and leave other pending messages, which a
+  -- second dispatcher is right to claim.
+  SELECT count(*) INTO v_count FROM claim_outbox('dispatcher-b', 100, interval '30 seconds') WHERE id = v_message.id;
   IF v_count <> 0 THEN
     RAISE EXCEPTION 'a second dispatcher claimed an active outbox lease';
   END IF;
