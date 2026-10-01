@@ -320,6 +320,10 @@
     "0134_waiting_issues_count.sql": {
       "previousReleaseCompatible": true,
       "note": "Grants infra_web SELECT on issue_links.status and issue_intake_settings(project_id, enabled); no schema change."
+    },
+    "0135_catalog_refresh_connection_kind.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Grants infra_web SELECT on provider_connections.connection_kind, which Refresh now filters on; no schema change."
     }
   }
 }
