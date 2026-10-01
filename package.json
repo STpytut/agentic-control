@@ -108,7 +108,7 @@
     "test:runtime": "node --test --test-timeout=300000 services/operations/test/runtime.test.mjs services/operations/test/runtime-updates.test.mjs",
     "test:integration": "npm run test:integration:db && npm run test:integration:live",
     "test:node": "npm run test:unit && npm run test:installer && npm run test:update && npm run test:runtime && npm run test:integration",
-    "test": "npm run test:node && npm run db:test",
+    "test": "npm run test:unit && npm run test:installer && npm run test:update && npm run test:runtime && npm run db:test && npm run test:integration",
     "lint": "pnpm --dir apps/web lint",
     "test:lease-contract": "scripts/check-lease-contract.sh",
     "check:runtime-adapters": "node scripts/check-runtime-adapters.mjs",

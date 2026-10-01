@@ -189,7 +189,11 @@ export function installDeclarationFor(manifest, releaseRoot, { coordinatorVersio
   if (section === undefined) return declareInstall(releaseRoot);
   const problems = installSectionProblems(section);
   if (problems.length) throw new Error(`the release's install declaration is not one this coordinator can apply:\n  ${problems.join("\n  ")}`);
-  if (parseLoose(coordinatorVersion) && compareVersions(coordinatorVersion, section.minCoordinatorVersion) < 0) {
+  // A development build (`0.0.0-dev+<sha>`, what a build without a tag is) is
+  // not older than any release: it is the code of its own tree. CI installs
+  // exactly that, and from rc.63 on was refused against its own declaration.
+  if (parseLoose(coordinatorVersion) && !coordinatorVersion.startsWith("0.0.0-dev")
+    && compareVersions(coordinatorVersion, section.minCoordinatorVersion) < 0) {
     throw new Error(`the release needs a coordinator of ${section.minCoordinatorVersion} or later to install it; this one is ${coordinatorVersion}`);
   }
   return section;

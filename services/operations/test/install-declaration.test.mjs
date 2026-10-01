@@ -96,6 +96,11 @@ test("a contract or a coordinator this code does not know is refused, not guesse
     { coordinatorVersion: "0.4.0-rc.26" }));
 });
 
+test("a development build is the code of its own tree, not a coordinator older than every release", () => {
+  assert.doesNotThrow(() => installDeclarationFor({ install: { ...section([unit("infra-cod-web.service")]), minCoordinatorVersion: "0.4.0-rc.63" } },
+    ROOT, { coordinatorVersion: "0.0.0-dev+1dbba6995317" }));
+});
+
 test("a release built before WP-A gets the declaration its tree implies", () => {
   const derived = installDeclarationFor({}, ROOT, { coordinatorVersion: "0.4.0-rc.25" });
   assert.deepEqual(derived, declareInstall(ROOT));
