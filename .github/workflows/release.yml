@@ -8,7 +8,10 @@ name: release
 #     existing.
 #   * On a `v*` tag the same checks run, then the artifact is built twice and
 #     compared, then signed with the production key, and the public half is checked
-#     again before anything is published.
+#     again before anything is published — when the repository variable
+#     CI_SIGNS_RELEASES is `true` and the key is in its secrets. Without it the
+#     owner signs a release locally and uploads it (docs/RELEASE_RUNBOOK.md), and a
+#     tag gets the unsigned candidate run instead of a publish that can only fail.
 #
 # What is deliberately not here: no step downloads a verifier, no step prints an
 # environment dump, and no job holds a permission it does not need.
@@ -66,7 +69,7 @@ jobs:
     # time to prove that a paragraph of prose still compiles is two hours spent
     # saying nothing.
     if: >-
-      ${{ !startsWith(github.ref, 'refs/tags/v')
+      ${{ (!startsWith(github.ref, 'refs/tags/v') || vars.CI_SIGNS_RELEASES != 'true')
         && github.event.pull_request.draft != true
         && needs.scope.outputs.code == 'true' }}
     needs: scope
@@ -180,7 +183,7 @@ jobs:
 
   publish:
     name: publish signed release
-    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    if: ${{ startsWith(github.ref, 'refs/tags/v') && vars.CI_SIGNS_RELEASES == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     permissions:

@@ -129,6 +129,24 @@ cd dist/releases/0.4.0-rc.16-linux-x64 \
   && minisign -V -p release/keys/infra-cod-release.pub -m SHA256SUMS
 ```
 
+## 5a. Publishing on GitHub
+
+The release workflow signs only when the repository variable `CI_SIGNS_RELEASES`
+is `true`. Until then a release is signed here and uploaded by hand. The tag is
+pushed only for releases that are published; ordinary candidates stay local.
+
+```bash
+git push origin v0.4.0-rc.16
+gh release create v0.4.0-rc.16 --prerelease --title "0.4.0-rc.16" --notes "…" \
+  dist/releases/0.4.0-rc.16-linux-x64/infra-cod-0.4.0-rc.16-linux-x64.tar.gz \
+  dist/releases/0.4.0-rc.16-linux-x64/SHA256SUMS \
+  dist/releases/0.4.0-rc.16-linux-x64/SHA256SUMS.minisig \
+  deploy/get.sh
+```
+
+`get.sh` goes with every published release, because
+`releases/latest/download/get.sh` is the one-command install in the README.
+
 ## 6. Delivery, and the update
 
 ```bash
