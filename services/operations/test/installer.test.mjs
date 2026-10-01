@@ -159,6 +159,19 @@ test("a re-run with a different --domain reconciles web.env and caddy.env", { sk
   assert.match(box.read("etc/infra-cod/web.env"), /^INFRA_COD_AUTH_PEPPER=.+$/m);
 });
 
+test("a re-run without --domain or --acme-email keeps what the host has", { skip }, (t) => {
+  const box = createSandbox();
+  t.after(() => box.cleanup());
+
+  assertClean(box.run([]), "first run");
+  // The default for a new host is <ip>.sslip.io; a host that has a domain must
+  // not be moved to it by a re-run that simply left the flag out.
+  assertClean(box.run([], { site: false }), "re-run with neither flag");
+  assert.match(box.read("etc/infra-cod/caddy.env"), /^INFRA_COD_DOMAIN=panel\.example\.test$/m);
+  assert.match(box.read("etc/infra-cod/caddy.env"), /^INFRA_COD_ACME_EMAIL=ops@example\.test$/m);
+  assert.match(box.read("etc/infra-cod/web.env"), /^INFRA_COD_SITE_URL=https:\/\/panel\.example\.test$/m);
+});
+
 test("--resume skips completed blocks", { skip }, (t) => {
   const box = createSandbox();
   t.after(() => box.cleanup());
