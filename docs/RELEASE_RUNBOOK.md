@@ -107,6 +107,14 @@ The tool definitions are checked by name because a release that ships without
 them tells the executor to call tools that are not there — which is how one
 candidate reached the host.
 
+## 4a. The agents' recommended versions
+
+A new host installs each agent at `recommendedVersion` in
+`services/operations/runtime-adapters.mjs`. Before a release, set each to the
+version the production host runs and has qualified in full (`infra-cod runtime
+list`, and a `passed` row in `runtime_qualifications`). rc.123 shipped Claude
+Code 2.1.270, and a clean install could not run Opus 5.5.
+
 ## 5. Signing — the owner's step
 
 ```bash

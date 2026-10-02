@@ -190,7 +190,13 @@ async function structuralProfiles(ownerId: string, entryIds: string[]) {
 function taskTitle(message: string, value: unknown) {
   if (typeof value === "string" && value.trim().length >= 2) return text(value, "title", 2, 120);
   const firstLine = message.split("\n").find((line) => line.trim())?.trim() ?? "New task";
-  return firstLine.length > 80 ? `${firstLine.slice(0, 77)}…` : firstLine;
+  if (firstLine.length <= 80) return firstLine;
+  // The chat's title is the pull request's: its first sentence when that is
+  // short, else cut at a word — not "…one JSON objec…" (the first clean install).
+  const sentence = /^(.{8,80}?)[.:!?](\s|$)/.exec(firstLine)?.[1];
+  if (sentence) return sentence;
+  const cut = firstLine.slice(0, 78);
+  return `${cut.slice(0, Math.max(cut.lastIndexOf(" "), 40)).trimEnd()}…`;
 }
 
 async function ownedProjectForAction(kind: string, body: Record<string, unknown>, ownerId: string) {

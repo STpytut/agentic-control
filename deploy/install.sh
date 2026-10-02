@@ -86,6 +86,22 @@ RECEIPT_FD=1
 
 die() { echo "${PROGRAM}: ERROR: $*" >&2; exit 1; }
 info() { echo "${PROGRAM}: $*"; }
+# A step whose output is detail, not news: it goes to the install log, and to
+# the screen only when the step fails. The first clean install printed 338
+# lines of apt, needrestart and PostgreSQL setup before the one that mattered.
+quietly() {
+  local label=$1; shift
+  local log="${PREFIX}/var/log/infra-cod-install.log"
+  mkdir -p "$(dirname "${log}")"
+  echo "=== ${label}: $*" >> "${log}"
+  local rc=0
+  "$@" >> "${log}" 2>&1 || rc=$?
+  if [[ ${rc} -ne 0 ]]; then
+    tail -40 "${log}" | sed "s/^/  ${label}: /" >&2
+    echo "${PROGRAM}: the full log is ${log}" >&2
+  fi
+  return "${rc}"
+}
 warn() { echo "${PROGRAM}: WARNING: $*" >&2; }
 
 # chown/chgrp are privileged and meaningless in the sandbox; every other
@@ -559,7 +575,8 @@ install_prerequisites() {
   done
   if [[ ${#need_apt[@]} -gt 0 ]]; then
     info "installing missing packages: ${need_apt[*]}"
-    apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${need_apt[@]}"
+    quietly apt apt-get update -qq
+    quietly apt env DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1 apt-get install -y -qq "${need_apt[@]}"
   fi
 }
 
@@ -1235,19 +1252,21 @@ setup_postgresql() {
     # repository is configured fails on a clean host.
     local h="/usr/share/postgresql-common/pgdg/apt.postgresql.org.sh"
     if [[ ! -x ${h} ]]; then
-      apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql-common ca-certificates curl
+      quietly apt apt-get update
+      quietly apt env DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1 apt-get install -y postgresql-common ca-certificates curl
     fi
     if [[ ! -f /etc/apt/sources.list.d/pgdg.sources && ! -f /etc/apt/sources.list.d/pgdg.list ]]; then
       [[ -x ${h} ]] || die "PGDG bootstrap script missing at ${h}"
-      "${h}" -y
+      quietly pgdg "${h}" -y
     fi
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends postgresql-client-17 postgresql-17
+    quietly apt env DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1 apt-get install -y --no-install-recommends postgresql-client-17 postgresql-17
   fi
-  "${RELEASE_DIR}/deploy/setup-postgresql-production.sh" 2>&1 | sed 's/^/  pg-setup: /'
+  info "setting up PostgreSQL"
+  quietly pg-setup "${RELEASE_DIR}/deploy/setup-postgresql-production.sh"
   if [[ -x ${RELEASE_DIR}/deploy/setup-postgresql-17-restore.sh ]]; then
-    "${RELEASE_DIR}/deploy/setup-postgresql-17-restore.sh" 2>&1 | sed 's/^/  restore-setup: /'
+    quietly restore-setup "${RELEASE_DIR}/deploy/setup-postgresql-17-restore.sh"
   fi
-  INFRA_COD_NODE_BIN="${NODE_BIN}" "${RELEASE_DIR}/deploy/run-production-migrations.sh" "${RELEASE_DIR}" 2>&1 | sed 's/^/  migrate: /'
+  quietly migrate env INFRA_COD_NODE_BIN="${NODE_BIN}" "${RELEASE_DIR}/deploy/run-production-migrations.sh" "${RELEASE_DIR}"
   local c; c=$(migration_count)
   local manifest="${RELEASE_DIR}/manifest.json" expected_count
   expected_count=$(sed -n 's/.*"migrationCount"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "${manifest}" | head -1)
@@ -1519,7 +1538,10 @@ run_doctor() {
   out=$(INFRA_COD_INSTALL_PREFIX="${PREFIX}" "${NODE_BIN}" "${cli}" doctor --json 2>&1) || rc=$?
   # What did not pass, one line each; the full report is `infra-cod doctor`.
   # Printing all of it made the first install's log 945 lines long.
-  if ! echo "${out}" | jq -r '.checks[] | select(.ok == false) | "  doctor: \(.severity) \(.check): \(.message)"' 2>/dev/null; then
+  # Under get.sh the agents are installed next, so their absence is not news.
+  local skip='^$'
+  [[ -n ${INFRA_COD_QUIET_SUMMARY:-} ]] && skip='^runtime\.(agent_cli|codex_login)'
+  if ! echo "${out}" | jq -r --arg skip "${skip}" '.checks[] | select(.ok == false) | select(.check | test($skip) | not) | "  doctor: \(.severity) \(.check): \(.message)"' 2>/dev/null; then
     echo "${out}" | sed 's/^/  doctor: /'
   fi
   local critical; critical=$(echo "${out}" | jq -r '.critical // 99' 2>/dev/null || echo "99")
@@ -1527,7 +1549,9 @@ run_doctor() {
   if [[ ${critical} -gt 0 ]]; then
     die "doctor reports ${critical} critical issue(s) — the installation is not usable as it stands"
   fi
-  [[ ${rc} -eq 0 ]] || warn "doctor reports warnings — review them before handing the panel over"
+  local shown_warnings
+  shown_warnings=$(echo "${out}" | jq -r --arg skip "${skip}" '[.checks[] | select(.ok == false) | select(.check | test($skip) | not)] | length' 2>/dev/null || echo 1)
+  [[ ${rc} -eq 0 || ${shown_warnings} == 0 ]] || warn "doctor reports warnings — review them before handing the panel over"
 }
 
 main() {

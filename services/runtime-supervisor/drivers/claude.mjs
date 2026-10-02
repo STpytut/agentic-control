@@ -164,6 +164,11 @@ function failure(stdout) {
   if (result && !result.is_error && !assistantError) return "";
   if (!result && !assistantError) return "";
   const text = typeof result?.result === "string" ? result.result.trim().slice(0, 300) : "";
+  // A CLI older than the model it was asked for: one sentence that says what
+  // to do, not the API's paragraph twice over (the first clean install, whose
+  // Claude Code 2.1.270 could not run Opus 5.5).
+  const needs = /version (\d+\.\d+\.\d+) or newer is required/i.exec(text)?.[1];
+  if (needs) return `Claude Code is too old for this model: it needs ${needs} or newer. Update it in Settings → Runtimes.`;
   const cls = assistantError === "authentication_failed" || status === 401 || status === 403 ? "not signed in"
     : assistantError === "rate_limit" || status === 429 ? "rate limited"
       : assistantError === "billing_error" ? "billing"
