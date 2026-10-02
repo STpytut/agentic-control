@@ -299,6 +299,8 @@ export const claudeDriver = Object.freeze({
 
   interrupt: Object.freeze({
     mechanism: "cgroup",
+    // The sign-in channel (rc.123) runs no turn: it ends with its cgroup.
+    channel: "cgroup",
   }),
 
   toolBridge: Object.freeze({

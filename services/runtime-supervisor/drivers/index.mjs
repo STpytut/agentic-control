@@ -53,7 +53,9 @@ export function driverGaps({ adapters, drivers }) {
       if (spec.transport === "batch" && driver.interrupt?.mechanism !== "cgroup" && driver.interrupt?.batch !== "cgroup") {
         gaps.push(`${adapter.name}'s ${surface} surface is a batch run, and its interrupt is not the cgroup`);
       }
-      if (spec.transport === "channel" && driver.interrupt?.mechanism !== "protocol") {
+      // A channel that runs no turn — Claude Code's sign-in — has nothing to
+      // interrupt in a protocol; the driver says it is stopped by its cgroup.
+      if (spec.transport === "channel" && driver.interrupt?.mechanism !== "protocol" && driver.interrupt?.channel !== "cgroup") {
         gaps.push(`${adapter.name}'s ${surface} surface is a channel, and its interrupt is not in its protocol`);
       }
     }

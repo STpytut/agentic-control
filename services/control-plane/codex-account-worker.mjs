@@ -444,6 +444,8 @@ export async function runOnce() {
 // minutes for the owner to paste a code, so it runs beside the poll rather than
 // inside it, where it would hold back a Codex login for that long.
 const claudeLogins = new Map();
+// Set by main; a sign-in waiting for its code stops with the service.
+let stopping = null;
 
 async function openClaudeAccount() {
   const supervisor = new RuntimeSupervisorClient();
@@ -475,7 +477,7 @@ export async function startClaudeLogins() {
   const claimed = await queryJson(`SELECT claim_claude_logins(:'worker_id',1)::text;`, { worker_id: workerId });
   const started = [];
   for (const session of Array.isArray(claimed) ? claimed : []) {
-    const running = processClaudeLogin(session, { open: openClaudeAccount, record: recordClaudeLogin, workerId })
+    const running = processClaudeLogin(session, { open: openClaudeAccount, record: recordClaudeLogin, workerId, signal: stopping })
       .then((result) => process.stdout.write(`${JSON.stringify({ type: "claude-login", session_id: session.id, ...result })}\n`))
       .catch((error) => process.stderr.write(`${JSON.stringify({ type: "claude-login.failed", session_id: session.id, error: safeError(error) })}\n`))
       .finally(() => claudeLogins.delete(session.id));
@@ -497,8 +499,9 @@ async function main() {
   // stays the fallback.
   const wake = createWake();
   let listening = null;
+  stopping = shutdownSignal();
   await runPollLoop({
-    name: "codex-account-broker", pollMs, signal: shutdownSignal(), wake,
+    name: "codex-account-broker", pollMs, signal: stopping, wake,
     fallbackMessage: "Codex account operation failed.",
     tick: async () => {
       if (!listening || listening.ended) {

@@ -8,11 +8,13 @@
 // records how it ended. The credential is written by Claude Code into
 // claude-worker's home and never passes through here.
 
+import { waitForPoll } from "./poll-wait.mjs";
+
 const URL_PATTERN = /https:\/\/\S+\/oauth\/authorize\?\S+/;
 const SUCCESS_PATTERN = /login successful/i;
 
 export async function processClaudeLogin(session, {
-  open, record, workerId, now = () => Date.now(), sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  open, record, workerId, signal = null, now = () => Date.now(), sleep = (ms) => waitForPoll(ms, signal),
   urlWithinMs = 60_000, codePollMs = 2_000, finishWithinMs = 90_000,
 }) {
   const expiresAt = new Date(session.expires_at).getTime();
@@ -30,7 +32,7 @@ export async function processClaudeLogin(session, {
 
     const urlBy = now() + urlWithinMs;
     let url = null;
-    while (!url && !closed && now() < urlBy) {
+    while (!url && !closed && !signal?.aborted && now() < urlBy) {
       url = URL_PATTERN.exec(output)?.[0] ?? null;
       if (!url) await sleep(250);
     }
@@ -38,7 +40,7 @@ export async function processClaudeLogin(session, {
     await step("url", url);
 
     let code = null;
-    while (!code && !closed && now() < expiresAt) {
+    while (!code && !closed && !signal?.aborted && now() < expiresAt) {
       code = (await step("take_code"))?.code ?? null;
       if (!code) await sleep(codePollMs);
     }

@@ -42,6 +42,7 @@ export const CAPABILITIES = Object.freeze({
   "usage.report": "reports token usage and cost per step",
   "account.device_login": "signs in by a device code, headless",
   "account.api_key": "signs in with a provider key, headless",
+  "account.login": "signs in with a code pasted from the browser, headless",
   "catalog.models": "lists the models its credential can use",
   "gate.smoke": "runs the capability gate's smoke test in a scratch workspace",
 });

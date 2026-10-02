@@ -17,7 +17,8 @@ INSERT INTO failure_reasons(reason, code, note) VALUES
   ('claude_login_unknown','not_found','no Claude sign-in with that id belongs to this owner'),
   ('claude_login_not_waiting','conflict','the sign-in is not waiting for a code: it has not shown its link yet, or it ended'),
   ('claude_login_code_invalid','invalid_argument','the code is the text Claude shows after signing in, without spaces'),
-  ('claude_login_not_held','lease_lost','this worker does not hold the sign-in')
+  ('claude_login_not_held','lease_lost','this worker does not hold the sign-in'),
+  ('claude_login_step_unknown','invalid_argument','the account worker recorded a step the sign-in does not have')
 ON CONFLICT (reason) DO NOTHING;
 
 CREATE TABLE claude_login_sessions (
@@ -148,7 +149,8 @@ BEGIN
       leased_by = NULL, lease_until = NULL, updated_at = clock_timestamp() WHERE id = p_session_id;
     RETURN jsonb_build_object('status', 'failed');
   END IF;
-  RAISE EXCEPTION 'unknown Claude sign-in step %', p_step USING ERRCODE = '22023';
+  PERFORM refuse('claude_login_step_unknown', format('no sign-in step %s', p_step), '22023');
+  RETURN NULL;
 END $$;
 
 REVOKE ALL ON FUNCTION start_claude_login(uuid), get_claude_login(uuid), submit_claude_login_code(uuid,uuid,text),
