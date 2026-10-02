@@ -2184,8 +2184,10 @@ export async function runRuntime(argv = [], { stdout = process.stdout, stderr = 
         // Without --version, the version this release's driver was verified at
         // (the baseline doctor reports): the first install on a clean server
         // stopped at `--version <exact>` with nothing saying which to choose.
-        const version = rest.includes("--version") ? valueOf(rest, "--version") : driverFor(adapterFor(name).name).verified.runtimeVersion;
-        if (!rest.includes("--version")) reporter.step(`no --version given: installing ${name} ${version}, the version this release is verified with`);
+        const adapter = adapterFor(name);
+        const version = rest.includes("--version") ? valueOf(rest, "--version")
+          : adapter.recommendedVersion ?? driverFor(adapter.name).verified.runtimeVersion;
+        if (!rest.includes("--version")) reporter.step(`no --version given: installing ${name} ${version}, the version this release recommends`);
         const actor = process.env.INFRA_COD_ACTOR ?? process.env.SUDO_USER ?? process.env.USER ?? "root";
         const acceptUnmanaged = rest.includes("--accept-unmanaged-updates");
         const waitIndex = rest.indexOf("--wait");
@@ -2377,7 +2379,7 @@ export async function runRuntime(argv = [], { stdout = process.stdout, stderr = 
       default:
         stderr.write(
           "infra-cod runtime <install|qualify|promote|rollback|probation|watch|list|verify|reconcile|remove|login>\n\n"
-          + "  install <name> [--version <exact>] Install and activate a runtime; without --version,\n                                     the version this release is verified with.\n                                     --wait <seconds> waits for a version in use.\n"
+          + "  install <name> [--version <exact>] Install and activate a runtime; without --version,\n                                     the version this release recommends.\n                                     --wait <seconds> waits for a version in use.\n"
           + "                                     --accept-unmanaged-updates installs a runtime\n"
           + "                                     whose self-update cannot be disabled.\n"
           + "  list [--json]                      Installed, authenticated, verified, ready.\n"

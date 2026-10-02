@@ -52,7 +52,16 @@ export function databaseRecorder() {
               jsonb_array_elements(s.executors) x)
         SELECT COALESCE(jsonb_agg(jsonb_build_object('provider', provider_id, 'model', model_id) ORDER BY provider_id, model_id), '[]')::text
         FROM used WHERE runtime_type = :'runtime' AND model_id IS NOT NULL;`, { runtime });
-      return Array.isArray(value) ? value.slice(0, 8) : [];
+      if (Array.isArray(value) && value.length) return value.slice(0, 8);
+      // A new host has no team yet, and a qualification that found nothing to
+      // run turns with ended incomplete — so the update that a too-old runtime
+      // needed was never offered (rc.124, the first clean install). One model
+      // this host has checked stands in, the smallest one there is.
+      const fallback = await queryJson(`SELECT COALESCE(jsonb_agg(jsonb_build_object('provider', provider_id, 'model', model_id)), '[]')::text
+        FROM (SELECT provider_id, model_id FROM provider_model_catalog
+              WHERE runtime_type = :'runtime' AND status = 'verified' AND model_id IS NOT NULL
+              ORDER BY (model_id ~* '(haiku|mini|flash|nano|small)') DESC, model_id LIMIT 1) m;`, { runtime });
+      return Array.isArray(fallback) ? fallback : [];
     },
     async close() { await closePool(); },
   };

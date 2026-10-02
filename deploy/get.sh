@@ -110,4 +110,8 @@ for agent in codex claude; do
   fi
 done
 
+# Which newer versions exist, now rather than at the hourly timer: the panel
+# said "up to date" on a new host that had simply not looked yet.
+infra-cod runtime watch --record >/dev/null 2>&1 || true
+
 bash "${installer}" --summary

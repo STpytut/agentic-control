@@ -98,6 +98,10 @@ export function codexTaskConfigOverrides(version, { node, bridge }) {
 const ADAPTERS = {
   codex: {
     name: "codex",
+    // What `runtime install codex` and a new host get (rc.124): the version the
+    // author's host qualified in full (rc.110, 2026-10-01) and runs every day. The
+    // driver's verified baseline is older, and too old for the newest models.
+    recommendedVersion: "0.159.3",
     // The Unix user the supervisor launches it as, and the home that holds its
     // credentials. Both already exist: tmpfiles creates them and the unit
     // contract checks their ownership and mode.
@@ -248,6 +252,10 @@ const ADAPTERS = {
 
   opencode: {
     name: "opencode",
+    // What `runtime install opencode` and a new host get (rc.124): the version the
+    // author's host qualified in full (rc.111, 2026-10-01) and runs every day. The
+    // driver's verified baseline is older, and too old for the newest models.
+    recommendedVersion: "1.18.34",
     user: "opencode-worker",
     home: "/home/opencode-worker",
     // Configuration lives here; the credential store does not — it is
@@ -374,6 +382,10 @@ const ADAPTERS = {
   // PoC on the production host (pocs/claude-runtime/RESULTS.md §7), at 2.1.270.
   claude: {
     name: "claude",
+    // What `runtime install claude` and a new host get (rc.124): the version the
+    // author's host qualified in full (rc.111, 2026-10-01) and runs every day. The
+    // driver's verified baseline is older, and too old for the newest models.
+    recommendedVersion: "2.1.286",
     user: "claude-worker",
     home: "/home/claude-worker",
     // The login, the sessions (keyed by the workspace path) and the settings.

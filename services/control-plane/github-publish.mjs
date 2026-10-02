@@ -150,7 +150,7 @@ export function pullRequestBody(intent) {
     // A chat started from an issue (0132): merging closes it (0133).
     ...(Number.isInteger(intent.issue_number) && intent.issue_number > 0 ? [`Closes #${intent.issue_number}`, ""] : []),
     "---",
-    `Published by infra_cod after the operator's approval. Commit \`${intent.head_commit_sha}\`, review evidence \`${intent.evidence_digest}\`.`,
+    `Published by Agentic Control after the owner's approval. Commit \`${intent.head_commit_sha}\`, review evidence \`${intent.evidence_digest}\`.`,
   ];
   return lines.join("\n").slice(0, 60_000);
 }

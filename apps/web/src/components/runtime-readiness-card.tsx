@@ -89,8 +89,14 @@ function catalogChange(q: RuntimeQualification) {
 
 function QualificationChecks({ q }: { q: RuntimeQualification }) {
   const failed = q.checks.filter((check) => check.result === "failed" || check.result === "inconclusive");
+  // Checks that stopped for one shared reason are one line, not a column of
+  // red crosses that all say the same (the first clean install: eleven).
+  const reasons = new Set(failed.map((check) => `${check.failureClass ?? ""}|${check.detail ?? ""}`));
+  const oneReason = failed.length > 1 && reasons.size === 1;
   return <>
-    {failed.length > 0 && <ul className="type-meta mt-1 grid list-none gap-0.5 p-0">
+    {oneReason && <p className="type-meta mt-1 text-danger [overflow-wrap:anywhere]">
+      {failed.length} checks did not run{failed[0].detail ? `: ${failed[0].detail}` : ""}.</p>}
+    {!oneReason && failed.length > 0 && <ul className="type-meta mt-1 grid list-none gap-0.5 p-0">
       {failed.map((check) => <li key={check.check} className="text-danger [overflow-wrap:anywhere]">
         <span aria-hidden="true">✕ </span><span className="font-medium">{check.check}</span>
         {check.failureClass ? ` · ${check.failureClass}` : ""}{check.detail ? ` — ${check.detail}` : ""}
@@ -166,8 +172,10 @@ function VersionDetail({ runtime, active, watch, qualifications, activations, re
   const verification = active ? activeVerification(active, watch, activations, qualifications) : null;
   const byVersion = new Map(qualifications.map((q) => [q.version, q]));
   const newer = new Map((watch?.newer ?? []).map((entry) => [entry.version, entry]));
-  const candidates = [...new Set([...newer.keys(), ...qualifications.map((q) => q.version)])]
-    .filter((version) => !active || compareVersions(version, active) > 0)
+  // A runtime that is not installed has no versions to choose between: it is
+  // installed, at the version the release recommends, and that is all it says.
+  const candidates = !active ? [] : [...new Set([...newer.keys(), ...qualifications.map((q) => q.version)])]
+    .filter((version) => compareVersions(version, active) > 0)
     .sort((a, b) => compareVersions(b, a));
   const shown = candidates.slice(0, 4);
   const last = activations[0];
@@ -182,7 +190,9 @@ function VersionDetail({ runtime, active, watch, qualifications, activations, re
         {shown.map((version) => <Candidate key={version} runtime={runtime} version={version} watch={newer.get(version)} q={byVersion.get(version)} open={open} last={lastRequest}/>)}
         {candidates.length > shown.length && <li className="type-meta text-muted">and {candidates.length - shown.length} older newer version{candidates.length - shown.length === 1 ? "" : "s"}</li>}
       </ul>
-      : watch && !watch.error && <p className="type-meta text-muted">Up to date as of {watch.checkedAt ? day(watch.checkedAt) : "the last check"}.</p>}
+      : !active ? <CopyCommand className="mt-1" label="Not installed. Install it on the server" command={`infra-cod runtime install ${runtime}`}/>
+      : watch?.checkedAt && !watch.error ? <p className="type-meta text-muted">Up to date as of {day(watch.checkedAt)}.</p>
+      : !watch?.error && <p className="type-meta text-muted">Newer versions not checked yet; the host looks within the hour.</p>}
     {last && <div className="type-meta">
       <p className="text-muted">Last change: {last.kind === "rollback" ? "rolled back" : "promoted"} {last.from} → {last.version} on {day(last.at)} by {last.actor}
         {last.acceptedUnqualified ? " without a qualification" : ""}{last.reason ? ` (${last.reason})` : ""}</p>

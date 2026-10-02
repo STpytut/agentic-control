@@ -138,7 +138,11 @@ export function batchOutcome(driver, run) {
   const stdout = typeof run?.stdout === "string" ? run.stdout : "";
   const answer = typeof driver.stream?.answer === "function" ? driver.stream.answer(stdout) : stdout;
   const stderrLine = run?.exit_code === 0 ? "" : String(run?.stderr ?? "").trim().split("\n").at(-1) ?? "";
-  const failure = [driver.stream?.failure?.(stdout) ?? "", stderrLine].filter(Boolean).join(" — ");
+  // The stream's reason first; stderr only when it says something the stream
+  // did not — a CLI repeats its API error on both, and the panel showed it twice.
+  const streamed = driver.stream?.failure?.(stdout) ?? "";
+  const failure = streamed && (!stderrLine || /too old for this model/.test(streamed)) ? streamed
+    : [streamed, stderrLine].filter(Boolean).join(" — ");
   return {
     answer: String(answer ?? ""),
     failure, exited: run?.exit_code !== 0,
