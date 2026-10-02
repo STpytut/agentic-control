@@ -1551,7 +1551,9 @@ run_doctor() {
   fi
   local shown_warnings
   shown_warnings=$(echo "${out}" | jq -r --arg skip "${skip}" '[.checks[] | select(.ok == false) | select(.check | test($skip) | not)] | length' 2>/dev/null || echo 1)
-  [[ ${rc} -eq 0 || ${shown_warnings} == 0 ]] || warn "doctor reports warnings — review them before handing the panel over"
+  if [[ ${rc} -ne 0 ]] && ! [[ -n ${INFRA_COD_QUIET_SUMMARY:-} && ${shown_warnings} == 0 ]]; then
+    warn "doctor reports warnings — review them before handing the panel over"
+  fi
 }
 
 main() {
