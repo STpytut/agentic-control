@@ -1,5 +1,9 @@
 # Agentic Control
 
+[![Release](https://img.shields.io/github/v/release/STpytut/agentic-control?include_prereleases)](https://github.com/STpytut/agentic-control/releases/latest)
+[![CI](https://github.com/STpytut/agentic-control/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/STpytut/agentic-control/actions/workflows/release.yml)
+[![License: AGPL-3.0](https://img.shields.io/github/license/STpytut/agentic-control)](LICENSE)
+
 **A self-hosted control plane for AI coding agents. One agent plans and reviews,
 another writes the code, and you approve before anything reaches your
 repository.**
@@ -168,8 +172,10 @@ Details are in [docs/SECURITY.md](docs/SECURITY.md) and
 The project is pre-1.0 (`0.4.0-rc`). It is developed and used every day by one
 person on one server, and it has had more than a hundred release candidates.
 
-Expect rough edges in onboarding. Most design documents are in Russian; the
-developer overview is [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+Tell us where installing it stopped you. Inside the system the platform is
+still called `infra-cod`: the CLI, the services and the paths. The developer
+guide, with which design documents are in Russian, is
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 Website and early-access form: <https://agentic-control.pages.dev>.
 
