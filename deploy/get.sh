@@ -48,10 +48,17 @@ for tool in curl minisign sha256sum tar; do
   command -v "${tool}" >/dev/null 2>&1 || missing="${missing} ${tool}"
 done
 if [ -n "${missing}" ]; then
+  # A cloud server's first minutes belong to cloud-init and its apt runs; on the
+  # first real install (a DigitalOcean droplet) apt-get failed on their lock.
+  if command -v cloud-init >/dev/null 2>&1; then
+    say "waiting for cloud-init to finish"
+    cloud-init status --wait >/dev/null 2>&1 || true
+  fi
   say "installing${missing}"
-  apt-get update -qq
-  # shellcheck disable=SC2086
-  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ca-certificates curl minisign coreutils tar >/dev/null
+  apt-get -o DPkg::Lock::Timeout=300 update -qq
+  # needrestart would otherwise print its report into the install's output.
+  NEEDRESTART_SUSPEND=1 DEBIAN_FRONTEND=noninteractive \
+    apt-get -o DPkg::Lock::Timeout=300 install -y -qq ca-certificates curl minisign coreutils tar >/dev/null
 fi
 
 if [ -n "${version}" ]; then
@@ -84,5 +91,23 @@ installer=$(find . -maxdepth 3 -path '*/deploy/install.sh' | head -1)
 set -- --artifact "${work}/${tarball}" --checksums "${work}/SHA256SUMS" \
   --signature "${work}/SHA256SUMS.minisig" --public-key "${work}/release.pub" --acme-email "${email}"
 [ -n "${domain}" ] && set -- "$@" --domain "${domain}"
+case " ${passthrough} " in
+  *" --check "*|*" --dry-run "*|*" --json "*)
+    # shellcheck disable=SC2086
+    exec bash "${installer}" "$@" ${passthrough} ;;
+esac
+
 # shellcheck disable=SC2086
-bash "${installer}" "$@" ${passthrough}
+INFRA_COD_QUIET_SUMMARY=1 bash "${installer}" "$@" ${passthrough}
+
+# The agents, at the versions this release is verified with. A failure here is
+# reported and leaves the panel installed: the command is in the summary.
+for agent in codex claude; do
+  if infra-cod runtime install "${agent}" >/dev/null 2>"${work}/${agent}.log"; then
+    say "installed ${agent}"
+  else
+    say "could not install ${agent} now ($(tail -1 "${work}/${agent}.log")); the summary says how"
+  fi
+done
+
+bash "${installer}" --summary

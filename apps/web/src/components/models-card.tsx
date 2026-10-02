@@ -64,6 +64,18 @@ export function ModelsCard({ models }: { models: OperatorModels }) {
   }, [router]);
   const { watched, watch } = useModelChecks(onSettled);
 
+  // A check the server started by itself — after Refresh now, a reconnect or a
+  // runtime update — reaches the page as "checking" with nothing in this tab
+  // watching it, and stayed that way until a reload (found on the first
+  // install on a clean server). While any row is still checking, the server's
+  // view is read again.
+  const anyChecking = models.connections.some((connection) => connection.models.some((row) => row.state === "checking"));
+  useEffect(() => {
+    if (!anyChecking) return;
+    const timer = window.setInterval(() => router.refresh(), 4000);
+    return () => window.clearInterval(timer);
+  }, [anyChecking, router]);
+
   const connections = useMemo(() => [...models.connections].sort((a, b) =>
     compareVendors(connectionVendor(a), connectionVendor(b)) || a.label.localeCompare(b.label)), [models.connections]);
   // Settings → Models (Stage 12 N7): the connections under vendor tabs —

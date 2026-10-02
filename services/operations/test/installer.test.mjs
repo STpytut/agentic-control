@@ -159,6 +159,21 @@ test("a re-run with a different --domain reconciles web.env and caddy.env", { sk
   assert.match(box.read("etc/infra-cod/web.env"), /^INFRA_COD_AUTH_PEPPER=.+$/m);
 });
 
+test("the install ends with the panel's address, the generated sign-in and what to do next", { skip }, (t) => {
+  const box = createSandbox();
+  t.after(() => box.cleanup());
+
+  const result = box.run([]);
+  assertClean(result, "first run");
+  const credentials = box.read("etc/infra-cod/initial-credentials");
+  const password = /^password=(.+)$/m.exec(credentials)[1];
+  assert.match(result.stdout, /Panel {6}https:\/\/panel\.example\.test/);
+  assert.ok(result.stdout.includes(`Password   ${password}`), "the generated password is printed once, at the end");
+  assert.match(result.stdout, /walks you through the rest/);
+  // The full doctor report is not dumped into the install any more.
+  assert.doesNotMatch(result.stdout, /"checks": \[/);
+});
+
 test("a re-run without --domain or --acme-email keeps what the host has", { skip }, (t) => {
   const box = createSandbox();
   t.after(() => box.cleanup());

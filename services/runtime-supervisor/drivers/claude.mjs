@@ -20,6 +20,7 @@
 //
 // Pure: both sides import it.
 
+import { claudeAccountState, validateClaudeAccountInput } from "../claude-account-channel.mjs";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
@@ -200,6 +201,7 @@ export const claudeDriver = Object.freeze({
       "gate.smoke": "catalog-gate-worker.mjs: the batch smoke, a run and an interrupted run in a scratch workspace",
       "run.workspace_write": "Stage 12 X1 on the host: Bash in the sandbox shell ran a workspace script; the note beside the login was not there",
       "tools.worker_report": "claude-bridge.test.mjs: complete_task, report_blocker and request_user_input reach the run's socket in the gateway's shape",
+      "account.login": "rc.123, 2.1.286 in a container: with no TTY `claude auth login` prints the authorize URL and reads the code from stdin; claude-account-channel.test.mjs",
     }),
   }),
 
@@ -215,12 +217,15 @@ export const claudeDriver = Object.freeze({
     "gate.smoke": { by: "run", native: "the gate surface: a tool-less batch run in a scratch workspace" },
     "run.workspace_write": { by: "run", native: "`-p` with Read, Edit, Write and Bash pre-approved; Bash through CLAUDE_CODE_SHELL, the sandbox shell" },
     "tools.worker_report": { by: "toolBridge", native: "the MCP bridge's report tools (INFRA_BRIDGE_TOOLS=reports), calling the run's socket" },
+    "account.login": { by: "input", native: "`claude auth login`: the authorize URL on stdout, the pasted code on stdin" },
   }),
 
   surfaces: Object.freeze({
     project: Object.freeze({ transport: "batch", workspace: "grant", grantMode: "read_only", capability: "run.read_only" }),
     gate: Object.freeze({ transport: "batch", workspace: "gate", capability: "gate.smoke" }),
     task: Object.freeze({ transport: "batch", workspace: "grant", grantMode: "read_write", capability: "run.workspace_write" }),
+    // The sign-in from the panel (rc.123), in the runtime's own home.
+    account: Object.freeze({ transport: "channel", workspace: "home", capability: "account.login" }),
   }),
 
   sessions: Object.freeze({
@@ -237,6 +242,7 @@ export const claudeDriver = Object.freeze({
     // --effort only when the member has a level: none leaves the model's own
     // default, and the flag does not persist past this process.
     argv: ({ model, sessionId = null, newSessionId = null, prompt, surface = "gate", reasoningEffort = null }) => {
+      if (surface === "account") return ["auth", "login"];
       const surfaceArgs = SURFACE_ARGS[surface];
       if (!surfaceArgs) throw new Error(`Claude Code has no ${JSON.stringify(surface)} surface`);
       const effort = launchReasoningLevel(claudeDriver, reasoningEffort);
@@ -281,14 +287,20 @@ export const claudeDriver = Object.freeze({
   }),
 
   input: Object.freeze({
-    // A turn takes no stdin; the next input is the next turn, resumed.
-    channelState: () => null,
-    validate: (surface) => { throw new Error(`Claude Code has no channel on its ${surface} surface`); },
+    // A turn takes no stdin; the next input is the next turn, resumed. The
+    // sign-in takes one line: the code.
+    channelState: (surface) => (surface === "account" ? claudeAccountState() : null),
+    validate: (surface, data, state) => {
+      if (surface === "account") return validateClaudeAccountInput(data, state);
+      throw new Error(`Claude Code has no channel on its ${surface} surface`);
+    },
     observes: () => false,
   }),
 
   interrupt: Object.freeze({
     mechanism: "cgroup",
+    // The sign-in channel (rc.123) runs no turn: it ends with its cgroup.
+    channel: "cgroup",
   }),
 
   toolBridge: Object.freeze({

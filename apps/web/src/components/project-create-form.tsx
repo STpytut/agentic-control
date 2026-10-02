@@ -258,7 +258,10 @@ export function ProjectCreateForm({
         <Button variant="secondary" size="sm" className="w-9 px-0" onClick={() => setOpen(false)} aria-label="Close">×</Button>
       </div>
       <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
-        <div className="grid min-h-0 flex-1 content-start gap-4 overflow-y-auto overscroll-contain px-5 py-4">
+        {/* Only the popover scrolls inside itself. On the page the form is as tall
+            as it is, and overscroll-contain on it swallowed the wheel: the page
+            did not scroll while the cursor was over the form (first clean install). */}
+        <div className={inPage ? "grid content-start gap-4 px-5 py-4" : "grid min-h-0 flex-1 content-start gap-4 overflow-y-auto overscroll-contain px-5 py-4"}>
         <Field label="Project name" htmlFor="create-project-name"><TextInput id="create-project-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="My application" required minLength={2} maxLength={80}/></Field>
 
         <div className="flex gap-1 rounded-md border border-line p-1">

@@ -3,43 +3,55 @@
 import { controlPlaneActionHeaders } from "@/lib/csrf-client";
 import type { ClaudeConnectionState } from "@/lib/claude-connections";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { Badge, Button, Card } from "@agentic/design-system";
+import { useEffect, useRef, useState } from "react";
+import { Badge, Button, Card, TextInput } from "@agentic/design-system";
 import { connection as ui, connectionTone } from "@/components/ui/connection-card";
 import { dangerOutlineClasses } from "@/components/ui/danger-button";
 import { Notice } from "@/components/ui/notice";
 
-// Claude Code (sprint C K2; decisions C2 and C3). The login is the host's:
-// the operator runs `infra-cod runtime login claude` there, as the runtime's
-// user, and the credential never reaches the panel or the database. This card
-// says which step is missing, and connects the subscription for the team once
-// the host reports it signed in. An orchestrator only.
-function nextStep(state: ClaudeConnectionState) {
-  const { runtime } = state;
-  if (!runtime.known) return "The host has not reported Claude Code recently.";
-  if (!runtime.installed) return "Install it on the host: infra-cod runtime install claude --version <exact>";
-  if (!runtime.authenticated) return "Sign it in on the host: infra-cod runtime login claude";
-  return "";
+// Claude Code (sprint C K2; decisions C2 and C3; rc.123). The sign-in runs on
+// the host as the runtime's user — `claude auth login`, started from here
+// (0136): this card shows its link and passes the code the owner pastes to
+// that process. The credential itself stays in claude-worker's home and never
+// reaches the panel or the database. Once the host reports it signed in, the
+// subscription is connected for the team without another click.
+const OPEN = new Set(["requested", "awaiting_code", "verifying"]);
+
+async function action(body: Record<string, unknown>) {
+  const response = await fetch("/api/control-plane/actions", {
+    method: "POST",
+    headers: controlPlaneActionHeaders(),
+    body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || !data.ok) throw new Error(data.error ?? "Claude Code action failed");
+  return data;
 }
 
 export function ClaudeConnectionCard({ initial }: { initial: ClaudeConnectionState }) {
   const router = useRouter();
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  const [code, setCode] = useState("");
+  const autoConnected = useRef(false);
+  const { runtime, login } = initial;
   const connected = initial.connection?.status === "connected";
-  const step = nextStep(initial);
+  const signingIn = Boolean(login && OPEN.has(login.status));
+  const justSignedIn = login?.status === "succeeded" && runtime.authenticated !== true;
 
-  async function act(kind: "claude_connect" | "claude_disconnect") {
+  // While the sign-in moves, or the host has yet to report it, read again.
+  useEffect(() => {
+    if (!signingIn && !justSignedIn) return;
+    const timer = window.setInterval(() => router.refresh(), 2500);
+    return () => window.clearInterval(timer);
+  }, [signingIn, justSignedIn, router]);
+
+  async function act(kind: string, extra: Record<string, unknown> = {}) {
     setBusy(kind);
     setError("");
     try {
-      const response = await fetch("/api/control-plane/actions", {
-        method: "POST",
-        headers: controlPlaneActionHeaders(),
-        body: JSON.stringify({ kind, connectionId: initial.connection?.connectionId }),
-      });
-      const data = await response.json();
-      if (!response.ok || !data.ok) throw new Error(data.error ?? "Claude Code action failed");
+      await action({ kind, ...extra });
+      if (kind === "claude_login_code") setCode("");
       router.refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Claude Code action failed");
@@ -48,11 +60,22 @@ export function ClaudeConnectionCard({ initial }: { initial: ClaudeConnectionSta
     }
   }
 
+  // Signed in from here and reported by the host: connect it for the team.
+  useEffect(() => {
+    if (autoConnected.current || connected || runtime.authenticated !== true || login?.status !== "succeeded") return;
+    autoConnected.current = true;
+    void act("claude_connect");
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- once, when the host's report arrives
+  }, [connected, runtime.authenticated, login?.status]);
+
+  const installed = runtime.known && runtime.installed === true;
+  const signedIn = runtime.authenticated === true;
+
   return (
     <Card as="section" className="min-w-0">
       <div className={ui.heading}>
         <div>
-          <p className="type-eyebrow text-muted">ORCHESTRATOR</p>
+          <p className="type-eyebrow text-muted">AGENT</p>
           <h2 className="type-section-title mt-1.5">Claude Code</h2>
           <p className={ui.owner}>Your Claude subscription, signed in on the host.</p>
         </div>
@@ -62,12 +85,39 @@ export function ClaudeConnectionCard({ initial }: { initial: ClaudeConnectionSta
       </div>
 
       {error && <Notice tone="danger" className="mt-3.5">{error}</Notice>}
-      {step && <Notice tone="info" className="mt-3.5">{step}</Notice>}
+      {!runtime.known && <Notice tone="info" className="mt-3.5">The host has not reported Claude Code recently.</Notice>}
+      {runtime.known && !installed && <Notice tone="info" className="mt-3.5">Install it on the host: infra-cod runtime install claude</Notice>}
+
+      {installed && !signedIn && !signingIn && !justSignedIn && login?.status === "failed" && (
+        <Notice tone="danger" className="mt-3.5">The last sign-in did not complete: {login.failure}</Notice>
+      )}
+      {installed && login?.status === "requested" && (
+        <Notice tone="info" className="mt-3.5">Starting the sign-in on the host…</Notice>
+      )}
+      {installed && login?.status === "awaiting_code" && (
+        <Notice tone="info" className="mt-3.5 grid gap-2.5">
+          <strong className="font-medium">Sign in to Claude</strong>
+          <p className="m-0">1. Open the sign-in page and allow access.</p>
+          <a className="inline-flex min-h-8 w-fit items-center font-medium underline underline-offset-2" href={login.authorizeUrl} target="_blank" rel="noreferrer">
+            Open Claude sign-in
+          </a>
+          <p className="m-0">2. Paste the code it shows here.</p>
+          <form className="flex flex-wrap gap-2" onSubmit={(event) => { event.preventDefault(); void act("claude_login_code", { sessionId: login.id, code }); }}>
+            <TextInput className="min-w-0 flex-1 font-mono" value={code} onChange={(event) => setCode(event.target.value)}
+              placeholder="Paste the code" aria-label="Claude sign-in code" autoComplete="off" spellCheck={false} disabled={login.codeSubmitted}/>
+            <Button size="sm" type="submit" disabled={Boolean(busy) || login.codeSubmitted || code.trim().length < 8}>
+              {login.codeSubmitted || busy === "claude_login_code" ? "Checking…" : "Submit"}
+            </Button>
+          </form>
+        </Notice>
+      )}
+      {installed && login?.status === "verifying" && <Notice tone="info" className="mt-3.5">Checking the code with Claude…</Notice>}
+      {justSignedIn && <Notice tone="success" className="mt-3.5">Signed in. The host reports it within a minute.</Notice>}
 
       <dl className={ui.meta}>
-        <div className={ui.metaItem}><dt className={ui.metaTerm}>On the host</dt><dd className={ui.metaValue}>{!initial.runtime.known ? "unknown" : !initial.runtime.installed ? "not installed"
-          : initial.runtime.authenticated ? `signed in · ${initial.runtime.version}` : `signed out · ${initial.runtime.version}`}</dd></div>
-        <div className={ui.metaItem}><dt className={ui.metaTerm}>Role</dt><dd className={ui.metaValue}>Orchestrator only</dd></div>
+        <div className={ui.metaItem}><dt className={ui.metaTerm}>On the host</dt><dd className={ui.metaValue}>{!runtime.known ? "unknown" : !installed ? "not installed"
+          : signedIn ? `signed in · ${runtime.version}` : `signed out · ${runtime.version}`}</dd></div>
+        <div className={ui.metaItem}><dt className={ui.metaTerm}>Role</dt><dd className={ui.metaValue}>Orchestrator or executor</dd></div>
       </dl>
 
       <div className={ui.boundary}>
@@ -80,18 +130,22 @@ export function ClaudeConnectionCard({ initial }: { initial: ClaudeConnectionSta
 
       <div className={ui.actions}>
         {connected ? (
-          <button className={dangerOutlineClasses} onClick={() => act("claude_disconnect")} disabled={Boolean(busy)}>
+          <button className={dangerOutlineClasses} onClick={() => act("claude_disconnect", { connectionId: initial.connection?.connectionId })} disabled={Boolean(busy)}>
             {busy === "claude_disconnect" ? "Disconnecting…" : "Disconnect"}
           </button>
-        ) : (
-          <Button size="sm" onClick={() => act("claude_connect")} disabled={Boolean(busy) || Boolean(step)}>
+        ) : signedIn ? (
+          <Button size="sm" onClick={() => act("claude_connect")} disabled={Boolean(busy)}>
             {busy === "claude_connect" ? "Connecting…" : "Connect Claude Code"}
           </Button>
-        )}
+        ) : installed && !signingIn && !justSignedIn ? (
+          <Button size="sm" onClick={() => act("claude_login_start")} disabled={Boolean(busy)}>
+            {busy === "claude_login_start" ? "Starting…" : "Sign in with Claude"}
+          </Button>
+        ) : null}
       </div>
 
       <p className={ui.footnote}>
-        The login stays in the isolated claude-worker account on the VPS; disconnecting here stops dispatch to it, and signing out is done on the host.
+        The login stays in the isolated claude-worker account on the VPS; the code you paste goes only to the sign-in it was made for. Disconnecting here stops dispatch to it.
       </p>
     </Card>
   );

@@ -140,6 +140,9 @@ export function CodexConnectionCard({
             Open ChatGPT authorization
           </a>
           <small className="text-muted">Expires {formatDate(login.expiresAt)} UTC</small>
+          {/* The page OpenAI shows otherwise says only "Something went wrong";
+              that is what the first install on a clean server met. */}
+          <small className="text-muted">If ChatGPT says “Something went wrong”, allow it first: ChatGPT → Settings → Security → device code authorization for Codex. Then reconnect here for a new code.</small>
         </Notice>
       )}
       {login?.status === "pending" && !deviceReady && (

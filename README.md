@@ -60,7 +60,7 @@ reviewed pull request, including issues #3, #5 and #7.
 
 ## Requirements
 
-- Ubuntu 24.04 on x86-64, with root access, at least 2 GB RAM, 10 GB free disk
+- Ubuntu 24.04 on x86-64, with root access, at least 4 GB RAM, 10 GB free disk
   and ports 80, 443 and 3100 free.
 - Optionally, a domain whose A record points at the server. Without one, the
   panel uses `<server-ip>.sslip.io`.
@@ -112,15 +112,28 @@ sudo ./deploy/install.sh \
 
 </details>
 
-The installer is idempotent. It sets up PostgreSQL, Caddy, the pinned Node,
-systemd units and a separate OS user for each agent runtime. The owner's first
-password is in `/etc/infra-cod/initial-credentials`.
+The installer is idempotent. It sets up:
 
-Then install and sign in the agent runtimes you want:
+- PostgreSQL, Caddy and the pinned Node;
+- the systemd units;
+- a separate OS user for each agent runtime;
+- Codex and Claude Code, at the versions this release is verified with.
+
+The install ends with the panel's address and a single-use password. The panel
+asks you to change the password when you first sign in.
+
+Then connect your accounts:
+
+| What | Where |
+| --- | --- |
+| Codex (ChatGPT) | In the panel, Settings → Connections. First allow it in ChatGPT: Settings → Security → device code authorization for Codex. |
+| Claude Code | In the panel, Settings → Connections: Sign in with Claude, then paste the code it shows. |
+| GitHub | In the panel, Settings → Connections: create the GitHub App and choose the repositories it may use. |
+
+To add an agent later, or to see what is ready:
 
 ```bash
-sudo infra-cod runtime install codex --version <exact>
-sudo infra-cod runtime login codex
+sudo infra-cod runtime install opencode
 sudo infra-cod runtime list
 sudo infra-cod doctor
 ```

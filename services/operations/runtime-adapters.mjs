@@ -508,6 +508,9 @@ export function hostRequirementsOf(adapter, version) {
 
 export function adapterFor(name) {
   const adapter = ADAPTERS[name];
+  if (name === undefined || name === "") {
+    throw new Error(`name a runtime: ${runtimeNames().join(", ")}`);
+  }
   if (!adapter) {
     throw new Error(`unknown runtime ${JSON.stringify(name)}; this installation provisions ${runtimeNames().join(", ")}`);
   }

@@ -403,10 +403,16 @@ parse_args() {
       --resume) MODE_RESUME=1 ;;
       --json) MODE_JSON=1 ;;
       --help|-h) MODE_HELP=1 ;;
+      --summary) MODE_SUMMARY=1 ;;
       *) die "unknown: $1" ;;
     esac; shift
   done
   [[ ${MODE_HELP} -eq 1 ]] && usage
+  if [[ ${MODE_SUMMARY:-0} -eq 1 ]]; then
+    DOMAIN=$(env_value "${ETC_ROOT}/caddy.env" INFRA_COD_DOMAIN)
+    [[ -n ${DOMAIN} ]] || die "--summary: this host has no installation"
+    print_summary; exit 0
+  fi
   if [[ ${MODE_CHECK} -eq 0 && ${MODE_DRY_RUN} -eq 0 ]]; then
     [[ -n ${ARTIFACT} && -f ${ARTIFACT} ]] || die "--artifact required"
     [[ -n ${CHECKSUMS} && -f ${CHECKSUMS} ]] || die "--checksums required"
@@ -523,7 +529,11 @@ preflight_immutable() {
   grep -q "Ubuntu 24.04" /etc/os-release 2>/dev/null || die "requires Ubuntu 24.04"
   [[ $(uname -m) == x86_64 ]] || die "requires x86_64"
   local ram_mb; ram_mb=$(awk '/^MemTotal:/ { print int($2/1024) }' /proc/meminfo)
-  [[ ${ram_mb} -ge 1900 ]] || die "min ~2 GB RAM, got ${ram_mb} MB"
+  # 4 GB, not 2. A 2 GB droplet passed this check, installed, and then never
+  # ran a model check: the supervisor admits a background run only with room
+  # left for a task run after it, and 2 GB never has it. A "4 GB" VM reports
+  # ~3.9 GB here.
+  [[ ${ram_mb} -ge 3600 ]] || die "requires 4 GB of RAM, got ${ram_mb} MB: with less, the agents' model checks never get the memory to run"
   local free_gb; free_gb=$(df -BG / | awk 'NR==2 { gsub(/G/,"",$4); print $4 }')
   [[ ${free_gb} -ge 10 ]] || die "min 10 GB free, got ~${free_gb} GB"
   timedatectl show 2>/dev/null | grep -q 'NTPSynchronized=yes' || warn "NTP not synced"
@@ -1295,9 +1305,13 @@ setup_systemd_tmpfiles_caddy() {
   # Passing the same file systemd loads also means this validates the configuration
   # that will actually run, not an approximation of it.
   [[ -f ${ETC_ROOT}/caddy.env ]] || die "caddy.env is missing; block 7 must run before block 9"
-  "${CADDY_BIN}" fmt --diff "${CADDY_DIR}/Caddyfile" 2>&1 | sed 's/^/  caddy-fmt: /'
-  "${CADDY_BIN}" validate --envfile "${ETC_ROOT}/caddy.env" --config "${CADDY_DIR}/Caddyfile" 2>&1 \
-    | sed 's/^/  caddy-validate: /'
+  # Printed only when it fails. On success it was a page of Caddy's warnings and
+  # a formatting diff of the file's comments in the middle of the install.
+  local caddy_out
+  caddy_out=$("${CADDY_BIN}" validate --envfile "${ETC_ROOT}/caddy.env" --config "${CADDY_DIR}/Caddyfile" 2>&1) || {
+    echo "${caddy_out}" | sed 's/^/  caddy-validate: /' >&2
+    die "the Caddyfile does not validate"
+  }
   block_end 9
 }
 
@@ -1503,7 +1517,11 @@ run_doctor() {
   info "=== doctor ==="
   local out rc=0
   out=$(INFRA_COD_INSTALL_PREFIX="${PREFIX}" "${NODE_BIN}" "${cli}" doctor --json 2>&1) || rc=$?
-  echo "${out}" | sed 's/^/  doctor: /'
+  # What did not pass, one line each; the full report is `infra-cod doctor`.
+  # Printing all of it made the first install's log 945 lines long.
+  if ! echo "${out}" | jq -r '.checks[] | select(.ok == false) | "  doctor: \(.severity) \(.check): \(.message)"' 2>/dev/null; then
+    echo "${out}" | sed 's/^/  doctor: /'
+  fi
   local critical; critical=$(echo "${out}" | jq -r '.critical // 99' 2>/dev/null || echo "99")
   [[ ${critical} =~ ^[0-9]+$ ]] || critical=99
   if [[ ${critical} -gt 0 ]]; then
@@ -1547,10 +1565,6 @@ main() {
   materialise_runtime_state
   switch_current_and_start
 
-  if [[ -f ${CREDENTIALS_FILE} ]]; then
-    info "URL: https://${DOMAIN}"
-    info "Credentials: ${CREDENTIALS_FILE} (root:root 0600)"
-  fi
   run_doctor
 
   if [[ ${MODE_JSON} -eq 1 ]]; then
@@ -1565,6 +1579,43 @@ main() {
         credentials_file: $credentials, release_dir: $release_dir, current_link: $current_link}' >&${RECEIPT_FD}
   fi
   info "=== Installation complete ==="
+  # get.sh installs the agents after this and prints the summary itself.
+  [[ ${MODE_JSON} -eq 1 || -n ${INFRA_COD_QUIET_SUMMARY:-} ]] || print_summary
+}
+
+# What the operator needs next, at the end where it is seen. The first install
+# on a clean server ended on a doctor report, with the password one more ssh
+# command away. The password is generated, single-use — the panel makes it be
+# changed at the first sign-in — and is still in the credentials file.
+print_summary() {
+  local user='' pass=''
+  if [[ -f ${CREDENTIALS_FILE} ]]; then
+    user=$(sed -n 's/^username=//p' "${CREDENTIALS_FILE}")
+    pass=$(sed -n 's/^password=//p' "${CREDENTIALS_FILE}")
+  fi
+  cat <<SUMMARY
+
+  Agentic Control is installed.
+
+    Panel      https://${DOMAIN}
+SUMMARY
+  if [[ -n ${pass} ]]; then
+    cat <<SUMMARY
+    Username   ${user}
+    Password   ${pass}    (single-use: the panel asks for a new one)
+SUMMARY
+  else
+    echo "    Sign in with the owner account this host already has."
+  fi
+  echo
+  echo "  Next:"
+  local n=1
+  if [[ ! -e ${PREFIX}/usr/local/bin/codex || ! -e ${PREFIX}/usr/local/bin/claude ]]; then
+    echo "    ${n}. Install the agents:  infra-cod runtime install codex && infra-cod runtime install claude"; n=$((n + 1))
+  fi
+  echo "    ${n}. Open the panel and sign in. It walks you through the rest:"
+  echo "       your agents' accounts, GitHub, and the first project."
+  echo
 }
 
 main "$@"
