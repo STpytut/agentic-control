@@ -2181,7 +2181,11 @@ export async function runRuntime(argv = [], { stdout = process.stdout, stderr = 
     switch (subcommand) {
       case "install": {
         const name = rest[0];
-        const version = valueOf(rest, "--version");
+        // Without --version, the version this release's driver was verified at
+        // (the baseline doctor reports): the first install on a clean server
+        // stopped at `--version <exact>` with nothing saying which to choose.
+        const version = rest.includes("--version") ? valueOf(rest, "--version") : driverFor(adapterFor(name).name).verified.runtimeVersion;
+        if (!rest.includes("--version")) reporter.step(`no --version given: installing ${name} ${version}, the version this release is verified with`);
         const actor = process.env.INFRA_COD_ACTOR ?? process.env.SUDO_USER ?? process.env.USER ?? "root";
         const acceptUnmanaged = rest.includes("--accept-unmanaged-updates");
         const waitIndex = rest.indexOf("--wait");
@@ -2373,7 +2377,7 @@ export async function runRuntime(argv = [], { stdout = process.stdout, stderr = 
       default:
         stderr.write(
           "infra-cod runtime <install|qualify|promote|rollback|probation|watch|list|verify|reconcile|remove|login>\n\n"
-          + "  install <name> --version <exact>   Install and activate a runtime.\n                                     --wait <seconds> waits for a version in use.\n"
+          + "  install <name> [--version <exact>] Install and activate a runtime; without --version,\n                                     the version this release is verified with.\n                                     --wait <seconds> waits for a version in use.\n"
           + "                                     --accept-unmanaged-updates installs a runtime\n"
           + "                                     whose self-update cannot be disabled.\n"
           + "  list [--json]                      Installed, authenticated, verified, ready.\n"
@@ -2415,11 +2419,14 @@ export async function runRuntime(argv = [], { stdout = process.stdout, stderr = 
 export function loginRuntime(name, { stderr = process.stderr, spawn: launch = spawnSync } = {}) {
   const adapter = adapterFor(name);
   if (!Array.isArray(adapter.login) || !adapter.login.length) {
-    throw new RuntimeError(`${name} is signed in from the panel, not with runtime login`);
+    throw new RuntimeError(name === "codex"
+      ? "codex is signed in from the panel: Settings → Connections → Codex / ChatGPT. "
+        + "ChatGPT has to allow it first: ChatGPT → Settings → Security → device code authorization for Codex."
+      : `${name} is signed in from the panel (Settings → Connections), not with runtime login`);
   }
   const readiness = readinessOf(name);
   if (!readiness.installed) {
-    throw new RuntimeError(`${name} is not installed; install it first: infra-cod runtime install ${name} --version <exact>`);
+    throw new RuntimeError(`${name} is not installed; install it first: infra-cod runtime install ${name}`);
   }
   const result = launch(RUNUSER, [
     "-u", adapter.user, "--", "/usr/bin/env", "-i",

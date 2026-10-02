@@ -60,7 +60,7 @@ reviewed pull request, including issues #3, #5 and #7.
 
 ## Requirements
 
-- Ubuntu 24.04 on x86-64, with root access, at least 2 GB RAM, 10 GB free disk
+- Ubuntu 24.04 on x86-64, with root access, at least 4 GB RAM, 10 GB free disk
   and ports 80, 443 and 3100 free.
 - Optionally, a domain whose A record points at the server. Without one, the
   panel uses `<server-ip>.sslip.io`.

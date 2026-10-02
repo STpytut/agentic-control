@@ -91,5 +91,23 @@ installer=$(find . -maxdepth 3 -path '*/deploy/install.sh' | head -1)
 set -- --artifact "${work}/${tarball}" --checksums "${work}/SHA256SUMS" \
   --signature "${work}/SHA256SUMS.minisig" --public-key "${work}/release.pub" --acme-email "${email}"
 [ -n "${domain}" ] && set -- "$@" --domain "${domain}"
+case " ${passthrough} " in
+  *" --check "*|*" --dry-run "*|*" --json "*)
+    # shellcheck disable=SC2086
+    exec bash "${installer}" "$@" ${passthrough} ;;
+esac
+
 # shellcheck disable=SC2086
-bash "${installer}" "$@" ${passthrough}
+INFRA_COD_QUIET_SUMMARY=1 bash "${installer}" "$@" ${passthrough}
+
+# The agents, at the versions this release is verified with. A failure here is
+# reported and leaves the panel installed: the command is in the summary.
+for agent in codex claude; do
+  if infra-cod runtime install "${agent}" >/dev/null 2>"${work}/${agent}.log"; then
+    say "installed ${agent}"
+  else
+    say "could not install ${agent} now ($(tail -1 "${work}/${agent}.log")); the summary says how"
+  fi
+done
+
+bash "${installer}" --summary

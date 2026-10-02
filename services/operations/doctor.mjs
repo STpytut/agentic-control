@@ -820,7 +820,7 @@ export async function checkAgentRuntimes({
     if (!entry?.active) {
       check.warn(
         `${name} is not provisioned — agent sessions will fail until it is. `
-        + `Install it with \`infra-cod runtime install ${name} --version <exact>\`.`,
+        + `Install it with \`infra-cod runtime install ${name}\`.`,
       );
       checks.push(check);
       continue;
