@@ -163,7 +163,9 @@ test("a surface a driver does not have, or carries another way, is refused befor
     await assert.rejects(client.run({ runtime: "codex", surface: "project" }), (error) => error.code === "unsupported_surface");
     // Codex writes since Stage 12 X2, as a batch: its task is not a channel.
     await assert.rejects(client.open({ runtime: "codex", surface: "task" }), /codex's task surface is a batch, not a channel/);
-    await assert.rejects(client.run({ runtime: "claude", surface: "account" }), /claude has no "account" surface/);
+    // Claude's sign-in (rc.123) is a channel: it is not run as a batch.
+    await assert.rejects(client.run({ runtime: "claude", surface: "account" }), /claude's account surface is a channel, not a batch/);
+    await assert.rejects(client.run({ runtime: "claude", surface: "chat" }), /claude has no "chat" surface/);
     await assert.rejects(client.account({ runtime: "codex", operation: "status" }),
       /codex's account surface is a channel, not a local_server/);
     await assert.rejects(client.open({ runtime: "antigravity", surface: "project" }), (error) => error.code === "unknown_runtime");

@@ -433,7 +433,7 @@ const claudeStream = (name) => readFileSync(new URL(`./claude-streams/${name}`, 
 
 test("the Claude Code driver runs a turn read-only, with the platform's tools and nothing of the workspace's", () => {
   const claude = driverFor("claude");
-  assert.deepEqual(Object.keys(claude.surfaces).sort(), ["gate", "project", "task"]);
+  assert.deepEqual(Object.keys(claude.surfaces).sort(), ["account", "gate", "project", "task"]);
   assert.equal(surfaceOf(claude, "project").grantMode, "read_only");
   // Stage 12 X1: an executor too, decision C2's reason closed by M0.
   assert.deepEqual(adapterFor("claude").roles, ["orchestrator", "executor"]);
@@ -467,7 +467,9 @@ test("the Claude Code driver runs a turn read-only, with the platform's tools an
   assert.equal(gate[gate.indexOf("--tools") + 1], "");
   assert.equal(gate[gate.indexOf("--disallowedTools") + 1], "Read(~/.claude/**),Read(~/.claude.json)");
   assert.ok(!gate.includes("--mcp-config"));
-  assert.throws(() => claude.run.argv({ model: "haiku", prompt: "x", surface: "account" }), /no "account" surface/);
+  // The sign-in (rc.123) runs `claude auth login`, never a prompt; an unknown surface is refused.
+  assert.deepEqual(claude.run.argv({ model: "haiku", prompt: "x", surface: "account" }), ["auth", "login"]);
+  assert.throws(() => claude.run.argv({ model: "haiku", prompt: "x", surface: "chat" }), /no "chat" surface/);
   // Stage 12 X1: an executor's run writes the workspace; its Bash runs in the
   // sandbox shell with the login covered and the shell snapshots kept, and its
   // bridge serves the terminal reports — never the orchestrator's commands.

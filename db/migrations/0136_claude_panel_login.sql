@@ -48,6 +48,10 @@ LANGUAGE sql STABLE AS $$
     'created_at', s.created_at, 'expires_at', s.expires_at)
 $$;
 
+-- The driver's new capability, as the registry check reads it.
+INSERT INTO runtime_capabilities(runtime_type, capability) VALUES ('claude','account.login')
+ON CONFLICT DO NOTHING;
+
 -- The panel ------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION start_claude_login(p_owner_id uuid)
@@ -85,7 +89,7 @@ BEGIN
   IF v_session.status <> 'awaiting_code' OR v_session.expires_at <= clock_timestamp() THEN
     PERFORM refuse('claude_login_not_waiting', 'this sign-in is not waiting for a code; start it again');
   END IF;
-  IF v_code !~ '^[A-Za-z0-9_#.~-]{8,512}$' THEN
+  IF v_code !~ '^[A-Za-z0-9_#.~-]+$' OR char_length(v_code) NOT BETWEEN 8 AND 512 THEN
     PERFORM refuse('claude_login_code_invalid', 'paste the code Claude shows after signing in, as it is', '22023');
   END IF;
   UPDATE claude_login_sessions SET auth_code = v_code, updated_at = clock_timestamp()
