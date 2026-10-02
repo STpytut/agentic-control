@@ -731,6 +731,17 @@ export async function performControlPlaneAction(body: Record<string, unknown>, o
     return executeJson(`SELECT connect_claude_connection(:'owner_id'::uuid,:'actor',:'correlation')::text;`,
       { owner_id: operator.userId, actor, correlation });
   }
+  // rc.123 (0136): the sign-in itself, from the panel. Start runs
+  // `claude auth login` on the host; the code the owner pastes goes to that
+  // process, through the account worker, and is never read back.
+  if (kind === "claude_login_start") {
+    return executeJson(`SELECT start_claude_login(:'owner_id'::uuid)::text;`, { owner_id: operator.userId });
+  }
+  if (kind === "claude_login_code") {
+    if (typeof body.code !== "string" || body.code.length > 512) throw new Error("code is invalid");
+    return executeJson(`SELECT submit_claude_login_code(:'owner_id'::uuid,:'session_id'::uuid,:'code')::text;`,
+      { owner_id: operator.userId, session_id: uuid(body.sessionId, "sessionId"), code: body.code });
+  }
   if (kind === "claude_disconnect") {
     return executeJson(`SELECT disconnect_claude_connection(:'owner_id'::uuid,:'connection_id'::uuid,:'actor',:'correlation')::text;`,
       { owner_id: operator.userId, connection_id: uuid(body.connectionId, "connectionId"), actor, correlation });

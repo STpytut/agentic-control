@@ -324,6 +324,10 @@
     "0135_catalog_refresh_connection_kind.sql": {
       "previousReleaseCompatible": true,
       "note": "Grants infra_web SELECT on provider_connections.connection_kind, which Refresh now filters on; no schema change."
+    },
+    "0136_claude_panel_login.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds claude_login_sessions and its functions; nothing the previous release reads changes."
     }
   }
 }

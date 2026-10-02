@@ -8,7 +8,9 @@
 
 import { isMain } from "./entrypoint.mjs";
 import readline from "node:readline";
-import { queryJson, closePool } from "./db.mjs";
+import { queryJson, closePool, listen } from "./db.mjs";
+import { processClaudeLogin } from "./claude-login.mjs";
+import { createWake } from "./poll-wait.mjs";
 import { RuntimeSupervisorClient, cancelThrough, retryWhileRuntimeBusy } from "../runtime-supervisor/client.mjs";
 import { redactError, runPollLoop, shutdownSignal } from "./worker-loop.mjs";
 import { codexRateLimits } from "../runtime-supervisor/usage-limits.mjs";
@@ -437,6 +439,52 @@ export async function runOnce() {
   return results;
 }
 
+// Claude Code's sign-in from the panel (0136) shares this broker: it is the
+// other runtime account the panel signs in. A sign-in waits up to fifteen
+// minutes for the owner to paste a code, so it runs beside the poll rather than
+// inside it, where it would hold back a Codex login for that long.
+const claudeLogins = new Map();
+
+async function openClaudeAccount() {
+  const supervisor = new RuntimeSupervisorClient();
+  await supervisor.connect();
+  try {
+    const handle = await retryWhileRuntimeBusy(
+      () => supervisor.open({ runtime: "claude", surface: "account" }),
+      { onWait: ({ attempt, remainingMs }) => process.stderr.write(`${JSON.stringify({
+        type: "claude-login.waiting-for-runtime", attempt, remaining_ms: remainingMs,
+      })}\n`) },
+    );
+    handle.once("close", () => supervisor.close());
+    return handle;
+  } catch (error) {
+    supervisor.close();
+    throw error;
+  }
+}
+
+async function recordClaudeLogin({ sessionId, workerId: worker, step, value }) {
+  return queryJson(
+    `SELECT record_claude_login(:'session_id'::uuid,:'worker_id',:'step',NULLIF(:'value',''))::text;`,
+    { session_id: sessionId, worker_id: worker, step, value: value ?? "" },
+  );
+}
+
+export async function startClaudeLogins() {
+  if (claudeLogins.size > 0) return [];
+  const claimed = await queryJson(`SELECT claim_claude_logins(:'worker_id',1)::text;`, { worker_id: workerId });
+  const started = [];
+  for (const session of Array.isArray(claimed) ? claimed : []) {
+    const running = processClaudeLogin(session, { open: openClaudeAccount, record: recordClaudeLogin, workerId })
+      .then((result) => process.stdout.write(`${JSON.stringify({ type: "claude-login", session_id: session.id, ...result })}\n`))
+      .catch((error) => process.stderr.write(`${JSON.stringify({ type: "claude-login.failed", session_id: session.id, error: safeError(error) })}\n`))
+      .finally(() => claudeLogins.delete(session.id));
+    claudeLogins.set(session.id, running);
+    started.push({ kind: "claude_login", session_id: session.id, status: "started" });
+  }
+  return started;
+}
+
 async function main() {
   if (process.argv[2] === "once") {
     process.stdout.write(`${JSON.stringify({
@@ -445,11 +493,18 @@ async function main() {
     })}\n`);
     return;
   }
+  // A Claude sign-in started in the panel wakes the loop at once; the poll
+  // stays the fallback.
+  const wake = createWake();
+  let listening = null;
   await runPollLoop({
-    name: "codex-account-broker", pollMs, signal: shutdownSignal(),
+    name: "codex-account-broker", pollMs, signal: shutdownSignal(), wake,
     fallbackMessage: "Codex account operation failed.",
     tick: async () => {
-      const results = await runOnce();
+      if (!listening || listening.ended) {
+        listening = await listen("claude_login", () => wake.notify()).catch(() => null);
+      }
+      const results = [...await startClaudeLogins(), ...await runOnce()];
       return results.length ? results : undefined;
     },
   });

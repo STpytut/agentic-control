@@ -127,7 +127,7 @@ Then connect your accounts:
 | What | Where |
 | --- | --- |
 | Codex (ChatGPT) | In the panel, Settings → Connections. First allow it in ChatGPT: Settings → Security → device code authorization for Codex. |
-| Claude Code | On the server: `sudo infra-cod runtime login claude` |
+| Claude Code | In the panel, Settings → Connections: Sign in with Claude, then paste the code it shows. |
 | GitHub | In the panel, Settings → Connections: create the GitHub App and choose the repositories it may use. |
 
 To add an agent later, or to see what is ready:

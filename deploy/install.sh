@@ -1613,9 +1613,8 @@ SUMMARY
   if [[ ! -e ${PREFIX}/usr/local/bin/codex || ! -e ${PREFIX}/usr/local/bin/claude ]]; then
     echo "    ${n}. Install the agents:  infra-cod runtime install codex && infra-cod runtime install claude"; n=$((n + 1))
   fi
-  echo "    ${n}. Sign Claude Code in: infra-cod runtime login claude"; n=$((n + 1))
-  echo "    ${n}. In the panel, Settings → Connections: Codex (ChatGPT) and GitHub."
-  echo "       ChatGPT first: ChatGPT → Settings → Security → device code authorization for Codex."
+  echo "    ${n}. Open the panel and sign in. It walks you through the rest:"
+  echo "       your agents' accounts, GitHub, and the first project."
   echo
 }
 

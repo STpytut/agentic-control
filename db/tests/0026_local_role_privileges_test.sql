@@ -613,6 +613,11 @@ INSERT INTO infra_web_allowlist(signature) VALUES
   ('get_issue_intake(p_project_id uuid, p_owner_id uuid)'),
   ('start_issue_chat(p_link_id uuid, p_owner_id uuid, p_actor text, p_correlation text)'),
   ('dismiss_issue(p_link_id uuid, p_owner_id uuid, p_actor text)'),
+  -- Claude Code's sign-in from the panel (0136): start, read, paste the code.
+  -- Each is the owner's own; the code is never read back.
+  ('start_claude_login(p_owner_id uuid)'),
+  ('get_claude_login(p_owner_id uuid)'),
+  ('submit_claude_login_code(p_owner_id uuid, p_session_id uuid, p_code text)'),
   ('get_operator_model_catalog(p_operator_id uuid)'),
   ('get_operator_opencode_connections(p_operator_id uuid)'),
   ('get_operator_opencode_enrollment_status(p_operator_id uuid)'),
