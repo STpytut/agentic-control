@@ -1,151 +1,88 @@
-# AI Coding Control Plane
+# Developing Agentic Control
 
-Self-hosted платформа для удалённой работы с нативными AI coding agents в постоянных проектных workspace на VPS.
+How the repository is laid out, how to run its checks, and where the design
+lives. To install the platform on a server, see the [README](../README.md#install).
 
-Текущий gap-аудит и порядок завершения MVP: [docs/ROADMAP.md](ROADMAP.md).
-Новая рабочая сессия должна начинаться с [docs/PROJECT.md](PROJECT.md).
+## Names
 
-Репозиторий содержит нормативный комплект требований, исполняемые capability
-PoC и первую PostgreSQL-реализацию durable control plane.
+The product is **Agentic Control**. Inside the system it is still called
+`infra-cod`: the CLI (`infra-cod doctor`), the systemd units
+(`infra-cod-*.service`), the paths (`/opt/infra-cod`, `/etc/infra-cod`) and the
+database (`infra_cod`). Both names mean the same thing.
 
-## Статус
+## Layout
 
-- Версия ТЗ: `1.0`
-- Дата фиксации: `2026-07-14`
-- Статус: self-hosted foundation, Этапы 7–8
-- Целевая поставка: single-user V1
-- Реализация: dispatcher/reconciler, isolated Runtime Supervisor и durable
-  workers в коде; web control plane — Next.js `standalone` за Caddy.
-- **Database-часть Этапа 2 прошла Ubuntu-приёмку.** Production PostgreSQL setup,
-  peer mapping, 46 миграций и зашифрованный backup/restore проверены на Ubuntu
-  24.04 и повторно проверены после reboot. До готовой панели на чистом VPS
-  остаётся Этап 10: installer должен
-  поставить release artifact, Node, systemd units, Caddy и сгенерировать
-  локальные credentials.
-
-## Архитектурная формула
-
-```text
-browser/phone ──HTTPS──▶ Caddy ──▶ 127.0.0.1:3100 Next standalone
-                                          │
-                        Unix socket PostgreSQL 17/main (peer auth)
-                                          ▲
-   workers ───────────────────────────────┘  (свои peer-роли)
-   runtime users агентов ───────────────── X  (нет DB-доступа)
-```
-
-Caddy — единственный публикуемый наружу процесс и единственный владелец TLS и
-сжатия. Панель слушает только loopback. Доступ к базе — peer-аутентификация по
-Unix-сокету: OS-пользователь и роль PostgreSQL связаны 1:1, пароля нет нигде.
-Полная матрица unit → OS user → PG role и контракт для Этапа 2 —
-[`deploy/systemd/README.md`](../deploy/systemd/README.md).
-
-```text
-Web UI
-        ↓
-Deterministic Control Plane
-        ↓
-Session & Handoff Manager
-        ↓
-Runtime Adapters
-        ↓
-Native Codex / OpenCode sessions
-        ↓
-One persistent project workspace
-```
-
-Codex планирует, делегирует, ревьюит и публикует. OpenCode и Antigravity реализуют изменения. Платформа хранит состояние и доставляет события, но не заменяет внутреннюю логику агентов.
-
-## Нормативные документы
-
-| Документ | Назначение |
+| Path | What it is |
 | --- | --- |
-| [Product Spec](PRODUCT_SPEC.md) | Концепция, роли, сценарии, требования и границы продукта |
-| [MVP Spec](MVP_SPEC.md) | Состав V1, критерии приёмки и порядок реализации |
-| [Architecture](ARCHITECTURE.md) | Компоненты, workspace model, сессии, locks и recovery |
-| [Runtime Contract](RUNTIME_CONTRACT.md) | Контракт адаптера и интеграция нативных runtime |
-| [Capability Matrix](CAPABILITY_MATRIX.md) | Проверяемая совместимость Desktop, CLI, API и headless runtime |
-| [Events](EVENTS.md) | Workflow, события, payload, идемпотентность и retries |
-| [Data Model](DATA_MODEL.md) | Сущности, состояния и инварианты хранения |
-| [Security](SECURITY.md) | Полномочия, credentials, approvals и аудит |
-| [Operations](OPERATIONS.md) | VPS, процессы, наблюдаемость, backup и recovery |
-| [Open Questions](OPEN_QUESTIONS.md) | Неподтверждённые гипотезы и решения до реализации |
-| [Spec Changelog](SPEC_CHANGELOG.md) | Изменения после исходной фиксации ТЗ |
+| `apps/web` | The panel: Next.js, served as a standalone build behind Caddy. |
+| `packages/agentic-design-system` | The design system the panel and the website share. |
+| `services/control-plane` | The workers: dispatcher, reconciler, orchestrator, implementation, GitHub App broker, account brokers, model checks. Each is a systemd unit. |
+| `services/runtime-supervisor` | The only process that launches agents. It owns the runtime drivers (Codex, Claude Code, OpenCode), their sandboxes and the tool sockets. |
+| `services/operations` | Installer support, `infra-cod update` and `rollback`, backups and restore drills, `doctor`, runtime installation and qualification. |
+| `services/cli` | The `infra-cod` command. |
+| `db/migrations`, `db/tests` | The PostgreSQL schema as numbered migrations, and SQL tests that run inside a rolled-back transaction. |
+| `deploy` | `install.sh`, `get.sh`, systemd units, Caddy, AppArmor, tmpfiles. |
+| `release`, `scripts` | The release format, its signing key, and the build and verification scripts. |
+| `pocs` | The proofs of concept the runtime drivers cite as evidence. See [pocs/README.md](../pocs/README.md). |
 
-Архитектурные решения находятся в [`docs/adr`](adr/README.md).
+## Running the checks
 
-Исполняемые capability PoC находятся в [`pocs`](../pocs):
-
-- [`Codex exec runtime PoC`](../pocs/codex-runtime/RESULTS.md);
-- [`Codex app-server interactive PoC`](../pocs/codex-app-server/RESULTS.md);
-- [`Codex platform tools PoC`](../pocs/codex-platform-tools/RESULTS.md);
-- [`OpenCode runtime PoC`](../pocs/opencode-runtime/RESULTS.md);
-- [`Codex → OpenCode handoff PoC`](../pocs/codex-opencode-handoff/RESULTS.md).
-
-PostgreSQL migrations и откатываемые integration tests находятся в [`db`](../db/README.md).
-
-Live UI находится в [`apps/web`](../apps/web) и включает project overview,
-workspace lock, task contract, native-session telemetry, events/audit timeline и
-операторские действия для review, revision, approval и worker input/blocker.
-
-Production — это self-hosted установка: панель в виде `standalone`-сборки за
-Caddy, локальный PostgreSQL по Unix-сокету и те же worker-процессы на том же
-хосте. Ни hosted-платформы, ни внешней базы в контуре нет.
+Every suite runs in a Linux container from the committed `HEAD`, so commit
+first:
 
 ```bash
-npm run web:dev
-npm run web:build
-npm run stage:standalone -- --out /tmp/infra-cod-stage   # runtime tree + receipt
-npm run test:standalone                                  # smoke реальной сборки
+scripts/run-suites-in-container.sh
 ```
 
-## Release-артефакты
+It runs lint, the unit suites, the installer and update harnesses, and the SQL
+and integration suites against a disposable PostgreSQL 17. CI on GitHub runs
+the same suites, plus a full install on a clean Ubuntu 24.04 runner.
 
-Локальная сборка без подписи:
+The panel's type check and lint run on the host:
 
 ```bash
-npm run release:build          # dist/releases/: tarball + SHA256SUMS
+pnpm install --frozen-lockfile
+pnpm run typecheck
+pnpm run lint
 ```
 
-Сборка требует Node **24.20.0 ровно** и отказывается на любой другой patch-версии
-— так же, как и `npm run test:release:artifact`, который её вызывает. На машине с
-другим Node артефакт не собрать; используйте `scripts/run-suites-in-container.sh`
-или release-workflow. Остальные сюиты на этом не завязаны.
+The release build requires Node 24.20.0 exactly. On another version, build in
+a container; [RELEASE_RUNBOOK.md](RELEASE_RUNBOOK.md) has the command.
 
-Артефакт проверяется до установки, в порядке «подпись над `SHA256SUMS` → checksum
-tarball'а → список tar member'ов»; распаковка идёт только после того, как прошли
-все проверки.
+## Conventions
 
-```bash
-sh release/verify-release.sh --artifact dist/releases/infra-cod-<version>-linux-x64.tar.gz \
-  --public-key release/keys/infra-cod-release.pub --require-signature \
-  --extract /tmp/infra-cod-verify
-```
+- **A database change** is a new numbered migration, a test in `db/tests`, and
+  an entry in `db/schema-compatibility.json`. A function the panel calls is
+  listed in the web role's allowlist (`db/tests/0026`).
+- **A refusal** names a reason from the `failure_reasons` vocabulary.
+- **A worker's wait** takes the service's stop signal (`waitForPoll`), so a
+  restart never has to kill it.
+- **Comments say why.** A rule that came from a production incident names it.
 
-Формат архива, схему manifest'а и порядок проверок описывает
-[`docs/RELEASE_FORMAT.md`](RELEASE_FORMAT.md); контракт проверки и распаковки
-для установщика — раздел 19 [`docs/OPERATIONS.md`](OPERATIONS.md).
+## Design documents
 
-Production signing key ещё не создан, поэтому `--publish` намеренно падает, а
-подписанный artifact может собрать только CI на `ubuntu-24.04`. Локальная сборка
-на macOS — unsigned dev-кандидат и не является доказательством работы на Ubuntu.
+Written in English or in Russian, as marked.
 
-## Приоритет документов
+| Document | Language | About |
+| --- | --- | --- |
+| [PRODUCT_SPEC](PRODUCT_SPEC.md) | ru | Concept, roles, scenarios, the product's boundaries |
+| [MVP_SPEC](MVP_SPEC.md) | ru | What version 1 contains and how it is accepted |
+| [ARCHITECTURE](ARCHITECTURE.md) | ru | Components, workspaces, sessions, locks, recovery |
+| [RUNTIME_CONTRACT](RUNTIME_CONTRACT.md) | ru | What a runtime adapter must provide |
+| [CAPABILITY_MATRIX](CAPABILITY_MATRIX.md) | ru | Verified capabilities of each runtime |
+| [EVENTS](EVENTS.md) | ru | Workflow, events, idempotency, retries |
+| [DATA_MODEL](DATA_MODEL.md) | ru | Entities, states and invariants |
+| [SECURITY](SECURITY.md) | ru | Authority, credentials, approvals, audit |
+| [OPERATIONS](OPERATIONS.md) | ru | The host, processes, backups, updates, recovery |
+| [SELF_HOSTED_BASELINE](SELF_HOSTED_BASELINE.md) | ru | The single-host foundation |
+| [OPEN_QUESTIONS](OPEN_QUESTIONS.md) | ru | Hypotheses still to validate |
+| [RUNTIMES_AND_MODELS_DESIGN](RUNTIMES_AND_MODELS_DESIGN.md) | en | Model catalog, checks and runtime updates |
+| [ISSUE_INTAKE_DESIGN](ISSUE_INTAKE_DESIGN.md) | en | GitHub issues as chats |
+| [RELEASE_FORMAT](RELEASE_FORMAT.md) | en | The artifact, its manifest and verification |
+| [RELEASE_RUNBOOK](RELEASE_RUNBOOK.md) | en | Building, signing and publishing a release |
+| [DELIVERY_PIPELINE](DELIVERY_PIPELINE.md) | en | How changes are checked without depending on CI |
+| [GIT_WORKFLOW](GIT_WORKFLOW.md) | en | Branches, pull requests, tags |
+| [SPEC_CHANGELOG](SPEC_CHANGELOG.md) | en | How the specification changed |
 
-При противоречии документов действует следующий порядок:
-
-1. принятые ADR;
-2. `MVP_SPEC.md` для границ V1;
-3. `PRODUCT_SPEC.md` для продуктового поведения;
-4. `ARCHITECTURE.md`, `RUNTIME_CONTRACT.md`, `EVENTS.md`, `DATA_MODEL.md`;
-5. capability matrix и open questions как рабочие проверочные документы.
-
-## Главные ограничения
-
-- Платформа не реализует собственный agent loop.
-- Платформа не управляет внутренним LLM-контекстом агентов.
-- В V1 один проект имеет одного активного владельца записи workspace.
-- Orchestrator/model и executor roster выбираются из capability-verified runtime profiles.
-- Publishing capability отделена от роли orchestrator; в начальной конфигурации она разрешена только одобренному Codex profile.
-- Конкретный provider или тариф не является частью доменной идентичности агента.
-- Неподтверждённые возможности runtime нельзя считать реализуемыми до прохождения PoC.
+Architecture decisions are in [adr/](adr/README.md). When documents disagree,
+an accepted ADR wins.
