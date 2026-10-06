@@ -12,6 +12,10 @@ It runs on one Linux server you own, drives the agent CLIs you already pay for
 (Codex, Claude Code, OpenCode) and gives you a web panel you can use from a
 laptop or a phone.
 
+[![A 30-second film: the owner writes a task, the orchestrator plans it, another agent writes the code, the reviewer sends it back, the fix passes, and the owner approves the pull request](docs/images/demo.gif)](https://agentic-control.pages.dev/video/agentic-control.mp4)
+
+<sub>A 30-second film redrawn from the panel. [Watch it with sound](https://agentic-control.pages.dev/video/agentic-control.mp4).</sub>
+
 ![A review in the panel: the reviewing agent's findings and the executor's evidence](docs/images/panel-review.jpg)
 
 ## How a task goes
@@ -177,7 +181,7 @@ still called `infra-cod`: the CLI, the services and the paths. The developer
 guide, with which design documents are in Russian, is
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
-Website and early-access form: <https://agentic-control.pages.dev>.
+Website: <https://agentic-control.pages.dev>.
 
 ## License
 
