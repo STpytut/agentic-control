@@ -12,6 +12,11 @@ It runs on one Linux server you own, drives the agent CLIs you already pay for
 (Codex, Claude Code, OpenCode) and gives you a web panel you can use from a
 laptop or a phone.
 
+> **Early release.** One maintainer, pre-1.0, used daily on one production
+> server. Run it on a server you can rebuild, and keep the backups it makes.
+> On the server the product is still called **`infra-cod`**: that is the CLI
+> (`sudo infra-cod doctor`), the services and the paths.
+
 [![A 30-second film: the owner writes a task, the orchestrator plans it, another agent writes the code, the reviewer sends it back, the fix passes, and the owner approves the pull request](docs/images/demo.gif)](https://agentic-control.pages.dev/video/agentic-control.mp4)
 
 <sub>A 30-second film redrawn from the panel. [Watch it with sound](https://agentic-control.pages.dev/video/agentic-control.mp4).</sub>
@@ -175,11 +180,11 @@ Details are in [docs/SECURITY.md](docs/SECURITY.md) and
 
 The project is pre-1.0 (`0.4.0-rc`). It is developed and used every day by one
 person on one server, and it has had more than a hundred release candidates.
+Releases are signed and updates roll back on failure, but interfaces and
+defaults still change between release candidates. Use it at your own risk.
 
-Tell us where installing it stopped you. Inside the system the platform is
-still called `infra-cod`: the CLI, the services and the paths. The developer
-guide, with which design documents are in Russian, is
-[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
+Tell us where installing it stopped you. The developer guide, where some
+design documents are still in Russian, is [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 Website: <https://agentic-control.pages.dev>.
 
