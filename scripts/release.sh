@@ -52,7 +52,7 @@ git rev-parse -q --verify "refs/tags/$tag" >/dev/null && fail "$tag already exis
 tree="$(git rev-parse 'HEAD^{tree}')"
 
 step "2/7 the gate"
-gates="$(git rev-parse --git-dir)/infra-cod-gates"
+gates="$(git rev-parse --path-format=absolute --git-common-dir)/infra-cod-gates"
 mkdir -p "$gates"
 if [ -f "$gates/$tree" ]; then
   echo "this tree passed the gate on $(cat "$gates/$tree"); not run again"
