@@ -1,5 +1,12 @@
 # Spec Changelog
 
+## 2026-10-07 — notifications, approve & open PR, an unread list keeps its models (rc.127–rc.128)
+
+- **Telegram notifications** (migration 0140). The operator's own bot sends a message when a task needs their approval, an agent asks a question, a job stops for good, a pull request opens, or a publish fails. The bot token is stored only as the broker envelope the browser made; a new service, `infra-cod-telegram-notifier`, decrypts it on the VPS.
+- **The panel reads the reviewed files** (0139): `infra_web` may read `review_evidence.changed_files`, which the step card lists. The web reads test now checks columns, not only tables.
+- **Approve & open PR** (0138). One click approves and asks for the publish; the request is made in the operator's name when the host has prepared the commit, through `request_publish` and all its checks. A refusal leaves the approval standing.
+- **A Claude model list that could not be read keeps the models it listed** (0137). A refresh names the sources it did not read; their entries keep their status instead of becoming unavailable.
+
 ## 2026-09-26 — vendor, gateway and billing apart (Stage 11.4 A3, ADR-0018)
 
 - **A model has a vendor, a gateway and a billing, as three facts** (migration 0083). The gateway is the path and the party that bills: OpenCode Zen, OpenCode Go, OpenRouter, ChatGPT. The billing is how: free, subscription, direct_metered, third_party_metered. The vendor is the model's author, read off its id where the gateway carries it.

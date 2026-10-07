@@ -207,7 +207,7 @@ decision, consumption и operator incident resolution пишутся в append-o
 - Runtime egress по возможности ограничивается разрешёнными providers и integrations.
 - Streaming/SSE, если появится, использует тот же auth scope, что API
   (сейчас live-обновления идут polling'ом по обычным route'ам).
-- Telegram webhook имеет отдельный secret и ограниченный command surface.
+- Telegram — только исходящие уведомления (0140): без webhook, бот читает лишь `/start <одноразовый код>` через `getUpdates`. Токен бота хранится только как broker-envelope, расшифровывается notifier'ом на VPS и вычищается из ошибок.
 
 ## 10. Audit и privacy
 
