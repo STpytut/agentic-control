@@ -13,7 +13,7 @@
 import { isMain } from "./entrypoint.mjs";
 import { queryJson, closePool } from "./db.mjs";
 import { redactError, runPollLoop, shutdownSignal } from "./worker-loop.mjs";
-import { TELEGRAM_API, decryptBrokerEnvelope, linkedChat, looksLikeBotToken, nextOffset, notificationText, readPrivateKey, startsWithoutCode } from "./telegram.mjs";
+import { TELEGRAM_API, decisionKeyboard, decisionPress, decryptBrokerEnvelope, linkedChat, looksLikeBotToken, nextOffset, notificationText, readPrivateKey, startsWithoutCode } from "./telegram.mjs";
 
 const workerId = process.env.TELEGRAM_NOTIFIER_ID ?? `telegram-notifier-${process.pid}`;
 const pollMs = Number(process.env.TELEGRAM_NOTIFIER_POLL_MS ?? 5_000);
@@ -23,6 +23,10 @@ const domain = process.env.INFRA_COD_DOMAIN ?? "";
 // getUpdates offsets, per bot, for this process's life. Telegram keeps an
 // update for a day; one read twice only repeats a link that is already made.
 const offsets = new Map();
+// Presses that failed to be decided, by update: retried a few times (a
+// database restart), then skipped so one bad press cannot hold up the rest.
+const pressFailures = new Map();
+const PRESS_ATTEMPTS = 3;
 
 async function telegram(token, method, body, timeoutMs = 15_000) {
   const response = await fetch(`${TELEGRAM_API}/bot${token}/${method}`, {
@@ -101,6 +105,7 @@ async function serveConnection(connection) {
         title: "Connected to Agentic Control", body: "You will get a message here when a task needs you." }, domain) });
       return { kind: "linked" };
     }
+    if (connection.status === "connected") return await serveDecisions(token, connection);
     return undefined;
   } catch (error) {
     const message = redactError(error, "Telegram could not be reached.", [token]);
@@ -117,12 +122,53 @@ async function serveConnection(connection) {
   }
 }
 
+// Button presses in the linked chat (0142). The decision is the database's;
+// the press is answered, and the message keeps its text with the outcome in
+// place of the buttons.
+async function serveDecisions(token, connection) {
+  const key = connection.bot_username;
+  const updates = await telegram(token, "getUpdates", { offset: offsets.get(key) ?? 0, timeout: 0, allowed_updates: ["message", "callback_query"] });
+  const results = [];
+  for (const update of updates) {
+    const press = decisionPress(update, connection.chat_id);
+    if (press && !press.ignored) {
+      let answer;
+      try {
+        answer = await queryJson(`SELECT telegram_decide(:'owner'::uuid,:'chat'::bigint,:'token',:'choice')::text;`,
+          { owner: connection.operator_id, chat: String(press.chatId), token: press.token, choice: press.choice });
+        pressFailures.delete(update.update_id);
+      } catch (error) {
+        const failures = (pressFailures.get(update.update_id) ?? 0) + 1;
+        pressFailures.set(update.update_id, failures);
+        if (failures < PRESS_ATTEMPTS) throw error;
+        pressFailures.delete(update.update_id);
+        answer = { outcome: "refused", message: "The panel could not record this. Try again, or decide in the panel." };
+      }
+      await telegram(token, "answerCallbackQuery", { callback_query_id: press.queryId, text: String(answer?.message ?? "").slice(0, 190) }).catch(() => undefined);
+      if (press.messageId) {
+        // A refusal keeps the buttons: the token is still good for a retry.
+        await telegram(token, "editMessageText", { chat_id: press.chatId, message_id: press.messageId,
+          text: `${press.text}\n\n${answer?.outcome === "approved" ? "✅" : "ℹ️"} ${answer?.message ?? ""}`.slice(0, 4000),
+          disable_web_page_preview: true,
+          ...(answer?.outcome === "refused" && press.keyboard ? { reply_markup: press.keyboard } : {}) }).catch(() => undefined);
+      }
+      results.push({ kind: "decision", outcome: answer?.outcome });
+    } else if (press?.ignored) {
+      await telegram(token, "answerCallbackQuery", { callback_query_id: press.queryId }).catch(() => undefined);
+    }
+    // Moved past each update once it is handled, so a failed decision is
+    // pressed again rather than lost.
+    offsets.set(key, nextOffset([update], offsets.get(key) ?? 0));
+  }
+  return results.length ? { kind: "decisions", results } : undefined;
+}
+
 async function sendNotification(item) {
   let token = "";
   try {
     token = tokenOf(item.envelope);
     await telegram(token, "sendMessage", { chat_id: Number(item.chat_id), text: notificationText(item, domain),
-      disable_web_page_preview: true });
+      disable_web_page_preview: true, ...(decisionKeyboard(item, domain) ? { reply_markup: decisionKeyboard(item, domain) } : {}) });
     await queryJson(`SELECT complete_notification(:'id'::bigint,:'worker');`, { id: String(item.id), worker: workerId });
     return { kind: "sent", id: item.id };
   } catch (error) {
