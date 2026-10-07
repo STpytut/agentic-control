@@ -51,7 +51,8 @@ export function linkedChat(updates, linkCode) {
     const text = String(message?.text ?? "").trim();
     if (text !== `/start ${linkCode}`) continue;
     const chat = message?.chat;
-    if (!Number.isSafeInteger(chat?.id)) continue;
+    // A private chat only: in a group, everyone in it could press Approve.
+    if (!Number.isSafeInteger(chat?.id) || chat.type !== "private") continue;
     const label = chat.username ? `@${chat.username}` : [chat.first_name, chat.last_name].filter(Boolean).join(" ") || chat.title || "chat";
     return { chatId: chat.id, label: String(label).slice(0, 128) };
   }
@@ -104,7 +105,9 @@ export function decisionPress(update, chatId) {
   if (!query?.id) return null;
   const match = /^(ap|ao):([A-Za-z0-9]{20})$/.exec(String(query.data ?? ""));
   const fromChat = query.message?.chat?.id;
-  if (!match || fromChat !== Number(chatId)) return { queryId: query.id, ignored: true };
+  // The linked chat is a private one, so the person pressing is its owner: the
+  // chat and the sender are the same id.
+  if (!match || fromChat !== Number(chatId) || query.from?.id !== fromChat) return { queryId: query.id, ignored: true };
   return { queryId: query.id, choice: CHOICES[match[1]], token: match[2], chatId: fromChat,
-    messageId: query.message?.message_id, text: String(query.message?.text ?? "") };
+    messageId: query.message?.message_id, text: String(query.message?.text ?? ""), keyboard: query.message?.reply_markup ?? null };
 }

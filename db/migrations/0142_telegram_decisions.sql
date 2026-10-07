@@ -101,13 +101,19 @@ BEGIN
     RETURN jsonb_build_object('outcome','refused','message','This button has expired. Decide in the panel.');
   END IF;
   SELECT * INTO v_task FROM tasks WHERE id=v_decision.task_id;
-  IF v_task.status <> 'awaiting_review' OR v_task.version <> v_decision.task_version THEN
+  -- Moved on: no longer waiting for approval, or a newer review round asked
+  -- again (it has its own, newer token). A message written in the chat bumps
+  -- the version without either, and is not a reason to refuse: the approval
+  -- is then of the version the task is at, the round this token was sent for.
+  IF v_task.status <> 'awaiting_review'
+     OR EXISTS (SELECT 1 FROM telegram_decisions newer WHERE newer.task_id=v_decision.task_id
+                AND newer.task_version > v_decision.task_version) THEN
     UPDATE telegram_decisions SET used_at=clock_timestamp(), outcome='The task had already moved on.' WHERE token=p_token;
     RETURN jsonb_build_object('outcome','moved_on','message','The task has already moved on. Open the chat to see where it is.');
   END IF;
   BEGIN
     PERFORM approve_task_review(v_decision.project_id, v_decision.task_id, p_owner_id::text, 'Approved from Telegram',
-      'telegram-approve:' || v_decision.task_id || ':' || v_decision.task_version, v_decision.task_version, 'telegram:' || p_token);
+      'telegram-approve:' || v_decision.task_id || ':' || v_task.version, v_task.version, 'telegram:' || p_token);
   EXCEPTION WHEN OTHERS THEN
     RETURN jsonb_build_object('outcome','refused','message',left('The approval was refused: ' || SQLERRM, 300));
   END;

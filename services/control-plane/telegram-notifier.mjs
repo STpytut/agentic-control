@@ -23,6 +23,10 @@ const domain = process.env.INFRA_COD_DOMAIN ?? "";
 // getUpdates offsets, per bot, for this process's life. Telegram keeps an
 // update for a day; one read twice only repeats a link that is already made.
 const offsets = new Map();
+// Presses that failed to be decided, by update: retried a few times (a
+// database restart), then skipped so one bad press cannot hold up the rest.
+const pressFailures = new Map();
+const PRESS_ATTEMPTS = 3;
 
 async function telegram(token, method, body, timeoutMs = 15_000) {
   const response = await fetch(`${TELEGRAM_API}/bot${token}/${method}`, {
@@ -128,13 +132,25 @@ async function serveDecisions(token, connection) {
   for (const update of updates) {
     const press = decisionPress(update, connection.chat_id);
     if (press && !press.ignored) {
-      const answer = await queryJson(`SELECT telegram_decide(:'owner'::uuid,:'chat'::bigint,:'token',:'choice')::text;`,
-        { owner: connection.operator_id, chat: String(press.chatId), token: press.token, choice: press.choice });
+      let answer;
+      try {
+        answer = await queryJson(`SELECT telegram_decide(:'owner'::uuid,:'chat'::bigint,:'token',:'choice')::text;`,
+          { owner: connection.operator_id, chat: String(press.chatId), token: press.token, choice: press.choice });
+        pressFailures.delete(update.update_id);
+      } catch (error) {
+        const failures = (pressFailures.get(update.update_id) ?? 0) + 1;
+        pressFailures.set(update.update_id, failures);
+        if (failures < PRESS_ATTEMPTS) throw error;
+        pressFailures.delete(update.update_id);
+        answer = { outcome: "refused", message: "The panel could not record this. Try again, or decide in the panel." };
+      }
       await telegram(token, "answerCallbackQuery", { callback_query_id: press.queryId, text: String(answer?.message ?? "").slice(0, 190) }).catch(() => undefined);
       if (press.messageId) {
+        // A refusal keeps the buttons: the token is still good for a retry.
         await telegram(token, "editMessageText", { chat_id: press.chatId, message_id: press.messageId,
           text: `${press.text}\n\n${answer?.outcome === "approved" ? "✅" : "ℹ️"} ${answer?.message ?? ""}`.slice(0, 4000),
-          disable_web_page_preview: true }).catch(() => undefined);
+          disable_web_page_preview: true,
+          ...(answer?.outcome === "refused" && press.keyboard ? { reply_markup: press.keyboard } : {}) }).catch(() => undefined);
       }
       results.push({ kind: "decision", outcome: answer?.outcome });
     } else if (press?.ignored) {

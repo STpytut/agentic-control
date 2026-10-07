@@ -43,6 +43,15 @@ BEGIN
   END IF;
   IF (SELECT status FROM tasks WHERE id=v_task) <> 'awaiting_review' THEN RAISE EXCEPTION 'a refused press moved the task'; END IF;
 
+  -- A message written in the chat bumps the version but is not moving on: the
+  -- press is still the approval of this round (refused here only for want of
+  -- review evidence), not "moved on".
+  UPDATE tasks SET version=version+1 WHERE id=v_task;
+  v_answer := telegram_decide(v_owner, 4242, v_token, 'approve');
+  IF v_answer->>'outcome' <> 'refused' OR v_answer->>'message' NOT LIKE 'The approval was refused:%' THEN
+    RAISE EXCEPTION 'a version bump while waiting: %', v_answer;
+  END IF;
+
   -- The task moves on: the press is answered and the token spent.
   UPDATE tasks SET status='implementing', version=version+1 WHERE id=v_task;
   v_answer := telegram_decide(v_owner, 4242, v_token, 'approve_publish');
