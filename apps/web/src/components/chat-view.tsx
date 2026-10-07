@@ -70,9 +70,9 @@ function conversationRoot(tasks: TaskSummary[], selected: TaskSummary) {
 }
 
 // The executors the chat's newest task is bound to, as the step card names them.
-function executorLine(roster: ProjectWorkspace["agentRoster"], executorAssignmentIds: string[]) {
+function executorLine(roster: ProjectWorkspace["agentRoster"], executorAssignmentIds: string[], modelLabel: (model?: string) => string | undefined) {
   const bound = roster.filter((assignment) => executorAssignmentIds.includes(assignment.assignmentId));
-  return bound.map((assignment) => `${runtimeLabel(assignment.runtimeType)} · ${assignment.model}`).join(", ") || undefined;
+  return bound.map((assignment) => `${runtimeLabel(assignment.runtimeType)} · ${modelLabel(assignment.model)}`).join(", ") || undefined;
 }
 
 // A model's name as the team's catalogue gives it ("GPT-6 Luna"), else its id.
@@ -160,7 +160,7 @@ export function ChatView({ operator, workspace, activeTask, writeEnabled, view, 
                 <TeamLine roster={workspace.agentRoster} task={activeTask} modelLabel={modelLabel}/>
                 {messages.map((message) => <ChatMessage message={message} timeLabel={relativeTime(message.occurredAt)} modelLabel={modelLabel(message.model)} key={message.id}/>)}
                 <StepCard states={workSteps(activeTask.status, messages.map((message) => message.eventType), workspace.publishState?.stage ?? null)}
-                  executor={executorLine(workspace.agentRoster, activeTask.executorAssignmentIds)}
+                  executor={executorLine(workspace.agentRoster, activeTask.executorAssignmentIds, modelLabel)}
                   files={stepFiles(activeTask.status, workspace)}
                   action={<ShowPanelTab tab="changes">View changes</ShowPanelTab>}/>
                 <PublishStatusCard state={workspace.publishState}/>

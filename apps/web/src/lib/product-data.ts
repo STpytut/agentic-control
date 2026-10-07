@@ -905,7 +905,8 @@ export async function getProjectWorkspace(ownerId: string, projectId: string, re
     }
     if (activeTask.status === "awaiting_review") attention.push({ type: "review", id: activeTask.id, projectId,
       taskId: activeTask.id, taskVersion: activeTask.version, reviewerAgentId: activeTask.activeAgentId,
-      title: "Implementation ready for review", description: "Inspect the observed diff and executor checks, then approve or request changes.",
+      title: "Ready for your approval",
+      description: `${activeTask.orchestratorRuntime ? runtimeLabel(activeTask.orchestratorRuntime) : "The orchestrator"} reviewed the changes. Check the diff, then approve them or ask for changes. Once approved, you can publish them to GitHub as a pull request.`,
       time: activeTask.updatedAt });
   }
   return {

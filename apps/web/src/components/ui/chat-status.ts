@@ -25,7 +25,9 @@ export function chatStatusDot(status: string) {
 }
 
 export function chatStatusLabel(status: string) {
-  return status === "cancelled" ? "archived" : status.replaceAll("_", " ");
+  // awaiting_review is the operator's turn: the orchestrator has reviewed, and
+  // "awaiting review" read as if it had not.
+  return status === "cancelled" ? "archived" : status === "awaiting_review" ? "needs your approval" : status.replaceAll("_", " ");
 }
 
 // "now", "5m", "3h", "2d": the sidebar's compact age.

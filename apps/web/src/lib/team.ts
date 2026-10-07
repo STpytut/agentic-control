@@ -86,3 +86,19 @@ export const HELD_BACK_WORDS: Record<string, string> = {
   runtime_cannot_play_role: "their runtime cannot play this role",
   runtime_lacks_capability: "their runtime lacks a capability the role needs",
 };
+
+// A model as the panel names it to the operator: the catalogue's display name
+// ("GPT-6-Luna", "Claude Sonnet (latest)"), not its id, and for an alias what
+// it resolves to, named the same way. Chat, start screen and Team tab said
+// "sonnet → claude-sonnet-5-5" in one place and "Claude Sonnet (latest)" in
+// another.
+export function modelDisplayName(team: ProjectTeam | null, modelId: string) {
+  return team?.models.find((model) => model.modelId === modelId && model.displayName)?.displayName
+    || team?.assignments.find((assignment) => assignment.modelId === modelId && assignment.displayName)?.displayName
+    || modelId;
+}
+
+export function modelDisplayWithResolved(team: ProjectTeam | null, modelId: string, resolved: string | null | undefined) {
+  const name = modelDisplayName(team, modelId);
+  return resolved && resolved !== modelId ? `${name} → ${modelDisplayName(team, resolved)}` : name;
+}

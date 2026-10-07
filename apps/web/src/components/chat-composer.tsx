@@ -186,19 +186,28 @@ export function ChatComposer({ projectId, taskId, taskStatus, taskVersion, taskO
           : orchestrators[0]
             ? <span className={chip}><span className="text-muted">Orchestrator</span> <span className="truncate">{memberLabel(orchestrators[0])}</span></span>
             : <span className={cx(chip, "text-danger")}>No orchestrator in the team</span>}
-        {executors.map((item) => <label key={item.assignmentId} className={cx(chip, "cursor-pointer transition-colors duration-150 hover:border-ink/45 has-[input:checked]:border-ink/60")}>
-          <input type="checkbox" className="h-4 w-4 accent-[var(--color-ink)]" checked={executorAssignmentIds.includes(item.assignmentId)} onChange={() => toggleExecutor(item.assignmentId)}/>
+        {/* One executor is simply the team's: a checkbox beside it, and none
+            beside the orchestrator, asked a question there was no choice in.
+            With several, each is a choice for this chat, and says so. */}
+        {executors.length === 1
+          ? <span className={chip}><span className="text-muted">Executor</span> <span className="truncate">{memberLabel(executors[0])}</span></span>
+          : executors.map((item) => <label key={item.assignmentId} title="Use this executor in the new chat" className={cx(chip, "cursor-pointer transition-colors duration-150 hover:border-ink/45 has-[input:checked]:border-ink/60")}>
+          <input type="checkbox" className="h-4 w-4 accent-[var(--color-ink)]" checked={executorAssignmentIds.includes(item.assignmentId)} onChange={() => toggleExecutor(item.assignmentId)}
+            aria-label={`Use executor ${runtimeLabel(item.runtimeType)} in the new chat`}/>
           <span className="text-muted">Executor</span> <span className="truncate">{memberLabel(item)}</span>
         </label>)}
+        {executors.length > 1 && <span className="type-meta text-muted">Tick the executors this chat may use.</span>}
         {!executors.length && <span className={cx(chip, "text-danger")}>No executor in the team</span>}
       </div>}
       <div className="flex items-center justify-between gap-2 pt-1.5">
         <div className="type-meta flex flex-wrap items-center gap-x-2.5 gap-y-1 text-muted">
-          <label className="touch-target inline-flex h-8 cursor-pointer items-center rounded-sm border border-line px-2.5 font-medium text-ink/80 transition-colors duration-150 hover:border-ink/45 has-[input:disabled]:cursor-not-allowed has-[input:disabled]:opacity-55 has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-3 has-[input:focus-visible]:outline-focus" title="Attach Markdown document">
+          <label className="touch-target inline-flex h-8 cursor-pointer items-center rounded-sm border border-line px-2.5 font-medium text-ink/80 transition-colors duration-150 hover:border-ink/45 has-[input:disabled]:cursor-not-allowed has-[input:disabled]:opacity-55 has-[input:focus-visible]:outline-2 has-[input:focus-visible]:outline-offset-3 has-[input:focus-visible]:outline-focus" title={`Attach up to ${maximumMarkdownFiles} Markdown files (.md)`}>
             <input className="sr-only" type="file" accept=".md,.markdown,text/markdown" multiple onChange={(event) => void addAttachments(event)} disabled={!enabled || busy || attachments.length >= maximumMarkdownFiles}/>
-            ＋ MD
+            <span aria-hidden="true">＋&nbsp;</span>Attach .md
           </label>
-          <span className={outgoingMessage.length > maximumMessageLength ? "font-medium text-danger tabular-nums" : "tabular-nums"}>{outgoingMessage.length.toLocaleString("en-US")} / {maximumMessageLength.toLocaleString("en-US")}</span>
+          {/* The count only once it matters: "0 / 64,000" under every empty box was noise. */}
+          {outgoingMessage.length > maximumMessageLength * 0.8
+            && <span className={outgoingMessage.length > maximumMessageLength ? "font-medium text-danger tabular-nums" : "tabular-nums"}>{outgoingMessage.length.toLocaleString("en-US")} / {maximumMessageLength.toLocaleString("en-US")}</span>}
           <span className="hidden group-focus-within:inline">Enter to send · Shift+Enter for a new line</span>
         </div>
         {start

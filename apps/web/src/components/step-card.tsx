@@ -11,7 +11,9 @@ const STEPS = ["Plan", "Implementation", "Review", "Approve", "Publish"] as cons
 
 const PLAN = new Set(["draft", "planning", "ready"]);
 const IMPLEMENTATION = new Set(["implementation_requested", "implementing", "changes_requested", "revising"]);
-const REVIEW = new Set(["awaiting_review", "reviewing"]);
+// awaiting_review: the orchestrator has reviewed; approving is the operator's step.
+const REVIEW = new Set(["reviewing"]);
+const APPROVE = new Set(["awaiting_review"]);
 const APPROVED = new Set(["approved", "publishing", "deployed", "completed"]);
 
 export function workSteps(status: string, eventTypes: string[], publishStage: string | null = null): StepState[] {
@@ -21,7 +23,7 @@ export function workSteps(status: string, eventTypes: string[], publishStage: st
       : publishStage === "unavailable" ? "waiting" : "current";
     return STEPS.map((_, step) => step < 4 ? "done" : publish);
   }
-  const index = PLAN.has(status) ? 0 : IMPLEMENTATION.has(status) ? 1 : REVIEW.has(status) ? 2 : -1;
+  const index = PLAN.has(status) ? 0 : IMPLEMENTATION.has(status) ? 1 : REVIEW.has(status) ? 2 : APPROVE.has(status) ? 3 : -1;
   if (index >= 0) return STEPS.map((_, step) => step < index ? "done" : step === index ? "current" : "waiting");
   // needs_attention, failed, cancelled: where the conversation stopped.
   const reached = eventTypes.includes("implementation.completed") ? 2
