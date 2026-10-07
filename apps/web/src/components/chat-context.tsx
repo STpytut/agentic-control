@@ -168,7 +168,7 @@ export function LogView({ messages, events, taskIds, taskActivity }: { messages:
       <ol className="m-0 grid list-none overflow-hidden rounded-lg border border-line p-0">
         {messages.map((message) => <li key={message.id} className="type-meta grid grid-cols-[150px_minmax(0,1fr)] gap-3 border-b border-line px-4 py-2.5 last:border-b-0 phone:grid-cols-1 phone:gap-0.5">
           <time className="text-muted tabular-nums">{formatTimestamp(message.occurredAt)}</time>
-          <span className="min-w-0 [overflow-wrap:anywhere]"><strong className="font-medium">{message.author}</strong> · {firstLine(message.content)} <code className="type-mono-small text-muted">{message.eventType}</code></span>
+          <span className="min-w-0 [overflow-wrap:anywhere]">{message.author && <><strong className="font-medium">{message.author}</strong> · </>}{firstLine(message.content)} <code className="type-mono-small text-muted">{message.eventType}</code></span>
         </li>)}
         {!messages.length && <li className="type-meta px-4 py-4 text-muted">Nothing yet.</li>}
       </ol>

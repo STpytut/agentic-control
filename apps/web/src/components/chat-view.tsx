@@ -75,6 +75,28 @@ function executorLine(roster: ProjectWorkspace["agentRoster"], executorAssignmen
   return bound.map((assignment) => `${runtimeLabel(assignment.runtimeType)} · ${assignment.model}`).join(", ") || undefined;
 }
 
+// A model's name as the team's catalogue gives it ("GPT-6 Luna"), else its id.
+function modelLabelFor(team: ProjectTeam | null) {
+  const names = new Map<string, string>();
+  for (const model of team?.models ?? []) if (model.displayName) names.set(model.modelId, model.displayName);
+  for (const assignment of team?.assignments ?? []) if (assignment.displayName) names.set(assignment.modelId, assignment.displayName);
+  return (model?: string) => (model ? names.get(model) ?? model : undefined);
+}
+
+// Who does what in this chat, said once above it: the messages name their
+// runtime, and "Codex" alone did not say it plans and reviews.
+function TeamLine({ roster, task, modelLabel }: { roster: ProjectWorkspace["agentRoster"]; task: TaskSummary; modelLabel: (model?: string) => string | undefined }) {
+  const member = (assignment: ProjectWorkspace["agentRoster"][number]) => `${runtimeLabel(assignment.runtimeType)} (${modelLabel(assignment.model)})`;
+  const orchestrator = roster.find((assignment) => assignment.assignmentId === task.orchestratorAssignmentId);
+  const executors = roster.filter((assignment) => task.executorAssignmentIds.includes(assignment.assignmentId));
+  if (!orchestrator && !executors.length) return null;
+  return <p className="type-meta mb-6 rounded-md border border-line px-3 py-2 text-muted" aria-label="This chat's team">
+    <span className="font-medium text-ink">Team</span>
+    {orchestrator && <> · <span className="text-ink">{member(orchestrator)}</span> plans and reviews</>}
+    {executors.length > 0 && <> · <span className="text-ink">{executors.map(member).join(", ")}</span> {executors.length > 1 ? "write" : "writes"} the code</>}
+  </p>;
+}
+
 // A chat (Stage 12 N2, N3): its top bar, its stream or one of the long views
 // the context panel opens in the centre, the composer, and the panel.
 export function ChatView({ operator, workspace, activeTask, writeEnabled, view, runtimeReadiness, projectReadiness, projectTeam, operatorModels, operatorUsage }: {
@@ -93,6 +115,7 @@ export function ChatView({ operator, workspace, activeTask, writeEnabled, view, 
   const root = conversationRoot(tasks, activeTask);
   const chatTaskIds = tasks.filter((task) => task.conversationId === activeTask.conversationId).map((task) => task.id);
   const backHref = chatViewHref(project.id, activeTask.id);
+  const modelLabel = modelLabelFor(projectTeam);
   const centreTitle = view === "changes" ? "Changes" : view === "log" ? "Activity log" : view === "checks" ? "Team checks" : "";
 
   return <ControlPlaneShell operator={operator} projectId={project.id} activeConversationId={activeTask.conversationId}>
@@ -134,7 +157,8 @@ export function ChatView({ operator, workspace, activeTask, writeEnabled, view, 
               {!SETTLED.includes(activeTask.status)
                 && <div><TaskExecutorReadiness executors={taskAssignmentReadiness(projectReadiness, activeTask.executorAssignmentIds)} projectId={project.id}/></div>}
               <ChatScrollArea>
-                {messages.map((message) => <ChatMessage message={message} timeLabel={relativeTime(message.occurredAt)} key={message.id}/>)}
+                <TeamLine roster={workspace.agentRoster} task={activeTask} modelLabel={modelLabel}/>
+                {messages.map((message) => <ChatMessage message={message} timeLabel={relativeTime(message.occurredAt)} modelLabel={modelLabel(message.model)} key={message.id}/>)}
                 <StepCard states={workSteps(activeTask.status, messages.map((message) => message.eventType), workspace.publishState?.stage ?? null)}
                   executor={executorLine(workspace.agentRoster, activeTask.executorAssignmentIds)}
                   files={stepFiles(activeTask.status, workspace)}

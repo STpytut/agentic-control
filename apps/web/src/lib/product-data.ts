@@ -106,6 +106,14 @@ export type ChatMessage = {
   content: string;
   occurredAt: string;
   eventType: string;
+  // The part the author plays in the task, said next to its name: "Codex" alone
+  // did not say whether it planned, reviewed or wrote the code.
+  actorRole?: "orchestrator" | "reviewer" | "executor";
+  // The model the message was written with, as the runtime recorded it.
+  model?: string;
+  // A workflow record the operator should not miss (a run that ended without
+  // its report, a job that stopped for good) rather than a step of the routine.
+  notice?: boolean;
 };
 
 export type TaskActivity = {
@@ -452,30 +460,37 @@ function actorName(event: EventSummary, side: "from" | "to", fallback: string) {
   return runtime ? runtimeLabel(runtime) : String(actors[`${side}_agent`] ?? fallback);
 }
 
-function contentForEvent(event: EventSummary, task?: TaskSummary) {
+// The names a workflow event falls back to when its own row does not carry
+// them: the sides of the conversation's latest handoff.
+type Sides = { orchestrator: string; executor: string };
+
+function contentForEvent(event: EventSummary, task?: TaskSummary, sides: Sides = { orchestrator: "The orchestrator", executor: "the executor" }) {
   const payload = event.payload;
   if (event.eventType === "chat.user_message") return String(payload.content ?? task?.objective ?? "New task");
   if (event.eventType === "chat.agent_message") return String(payload.content ?? "Agent response recorded");
-  const from = actorName(event, "from", "The orchestrator");
-  const to = actorName(event, "to", "The executor");
+  const from = actorName(event, "from", sides.orchestrator);
+  const to = actorName(event, "to", sides.executor);
+  // Each line says who did what to whom, in the roles the team plays: the
+  // orchestrator plans and reviews, the executor writes the code.
   const labels: Record<string, string> = {
-    "implementation.requested": `${from} delegated implementation to ${to}.`,
-    "implementation.started": `${to} started working in the project workspace.`,
-    "implementation.completed": `${to} completed the implementation and returned it for review.`,
+    "implementation.requested": `${from} handed the work to ${to} to implement.`,
+    "implementation.started": `${to} started implementing in the project workspace.`,
+    "implementation.completed": `${to} finished and handed the work back for review.`,
     "implementation.blocked": `${to} reported a blocker.`,
     "run.input_requested": `${to} is waiting for your answer.`,
     "interaction.resolved": "Your answer was recorded and the workflow resumed.",
     // Written by approve_task_review, always as the operator.
     "review.approved": "You approved the implementation.",
-    "task.ready": "The task is ready for implementation.",
+    "task.ready": "The plan is ready; implementation can start.",
     "task.cancelled": "You closed this task. Nothing more runs for it; a message here starts a linked follow-up.",
-    "changes.requested": "Changes were requested from the executor.",
-    "revision.started": `${to} started the revision in the project workspace.`,
-    "revision.completed": `${to} completed the revision and returned it for review.`,
+    "changes.requested": `${sides.orchestrator} reviewed the work and sent it back to ${sides.executor} for changes.`,
+    "revision.started": `${to} started on the requested changes.`,
+    "revision.completed": `${to} finished the changes and handed the work back for review.`,
     "project.created": "Project metadata was created. Workspace provisioning is queued.",
     "project.provisioned": "The VPS workspace is ready.",
   };
-  return labels[event.eventType] ?? event.eventType.replaceAll(".", " ");
+  const line = labels[event.eventType] ?? event.eventType.replaceAll(".", " ");
+  return line.charAt(0).toUpperCase() + line.slice(1);
 }
 
 // A question the implementation asked, and the answer, are part of the
@@ -487,26 +502,26 @@ function interactionMessage(event: EventSummary, sensitive: boolean): ChatMessag
   const base = { id: event.id, occurredAt: event.occurredAt, eventType: event.eventType };
   if (event.eventType === "run.input_requested" && typeof payload.question === "string") {
     const context = typeof payload.context === "string" && payload.context.trim() ? `\n\n${payload.context}` : "";
-    return { ...base, role: "agent", author: actorName(event, "to", "The executor"), content: `${payload.question}${context}` };
+    return { ...base, role: "agent", author: actorName(event, "to", "The executor"), actorRole: "executor", content: `${payload.question}${context}` };
   }
   // An implementation that ended without its report (0066): the question it
   // opens for the operator, said by the control plane.
   if (event.eventType === "run.unreported" && typeof payload.question === "string") {
-    return { ...base, role: "system", author: "Control plane", content: payload.question };
+    return { ...base, role: "system", author: "", notice: true, content: payload.question };
   }
   // A job that ended for good (0072) — its runtime removed, its credential
   // gone, its attempts run out — says why, in the vocabulary's words.
   if (event.eventType === "runtime_job.dead_lettered" && typeof payload.message === "string") {
-    return { ...base, role: "system", author: "Control plane", content: payload.message };
+    return { ...base, role: "system", author: "", notice: true, content: payload.message };
   }
   // Sprint B P1: what the publish did — requested, pushed, the pull request,
   // or why it stopped — in the control plane's words.
   if (event.eventType.startsWith("publish.") && event.eventType !== "publish.prepared" && typeof payload.message === "string") {
-    return { ...base, role: "system", author: "Control plane", content: payload.message };
+    return { ...base, role: "system", author: "", notice: ["publish.failed", "publish.refused"].includes(event.eventType), content: payload.message };
   }
   if (event.eventType === "implementation.blocked" && typeof payload.reason === "string") {
     const action = typeof payload.requested_action === "string" && payload.requested_action.trim() ? `\n\n${payload.requested_action}` : "";
-    return { ...base, role: "agent", author: actorName(event, "to", "The executor"), content: `Blocked: ${payload.reason}${action}` };
+    return { ...base, role: "agent", author: actorName(event, "to", "The executor"), actorRole: "executor", content: `Blocked: ${payload.reason}${action}` };
   }
   if (event.eventType === "interaction.resolved") {
     const response = (payload.response as Record<string, unknown> | undefined)?.response;
@@ -518,25 +533,37 @@ function interactionMessage(event: EventSummary, sensitive: boolean): ChatMessag
 
 export function conversationMessages(events: EventSummary[], task?: TaskSummary): ChatMessage[] {
   let sensitive = false;
+  const sides: Sides = { orchestrator: task?.orchestratorRuntime ? runtimeLabel(task.orchestratorRuntime) : "The orchestrator", executor: "the executor" };
   return events.map((event) => {
     if (event.eventType === "run.input_requested") sensitive = (event.payload as Record<string, unknown>).sensitivity === "sensitive";
-    return interactionMessage(event, sensitive) ?? messageFromEvent(event, task);
+    const actors = (event.actors ?? {}) as Json;
+    if (actors.from_runtime) sides.orchestrator = runtimeLabel(String(actors.from_runtime));
+    if (actors.to_runtime) sides.executor = runtimeLabel(String(actors.to_runtime));
+    return interactionMessage(event, sensitive) ?? messageFromEvent(event, task, { ...sides });
   });
 }
 
-function messageFromEvent(event: EventSummary, task?: TaskSummary): ChatMessage {
+function messageFromEvent(event: EventSummary, task: TaskSummary | undefined, sides: Sides): ChatMessage {
   const isUser = event.eventType === "chat.user_message";
   // Only what an agent said is its message. A workflow event an agent caused —
   // task.ready, a delegation — is the control plane's record of it, and showed
-  // as a message from an "Orchestrator" nobody had heard of (P-5).
+  // as a message from an "Orchestrator" nobody had heard of (P-5). It has no
+  // author of its own: the chat shows it as a line in the timeline.
   const isAgent = event.eventType === "chat.agent_message";
+  const payload = event.payload as Record<string, unknown>;
   return {
     id: event.id,
     role: isUser ? "user" : isAgent ? "agent" : "system",
-    author: isUser ? "You" : isAgent ? agentDisplayName(event.payload.agent_name, event.payload.runtime_type) : "Control plane",
-    content: contentForEvent(event, task),
+    author: isUser ? "You" : isAgent ? agentDisplayName(payload.agent_name, payload.runtime_type) : "",
+    content: contentForEvent(event, task, sides),
     occurredAt: event.occurredAt,
     eventType: event.eventType,
+    // Every agent message is the orchestrator's (0077); the turn that resumes it
+    // after an implementation is its review (orchestrator-worker REVIEW_JOB_TYPES).
+    ...(isAgent ? {
+      actorRole: payload.source_job_type === "resume_orchestrator" ? "reviewer" as const : "orchestrator" as const,
+      ...(typeof payload.model === "string" && payload.model ? { model: payload.model } : {}),
+    } : {}),
   };
 }
 
