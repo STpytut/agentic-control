@@ -97,6 +97,8 @@ export type EventSummary = {
   // Who handed off to whom, for a workflow event: the handoff's agents, and
   // the runtime the recorded dispatch actually ran (0071).
   actors?: Json;
+  // An agent message's model, from its job's selection.
+  selectedModel?: string;
 };
 
 export type ChatMessage = {
@@ -562,7 +564,7 @@ function messageFromEvent(event: EventSummary, task: TaskSummary | undefined, si
     // after an implementation is its review (orchestrator-worker REVIEW_JOB_TYPES).
     ...(isAgent ? {
       actorRole: payload.source_job_type === "resume_orchestrator" ? "reviewer" as const : "orchestrator" as const,
-      ...(typeof payload.model === "string" && payload.model ? { model: payload.model } : {}),
+      ...(event.selectedModel ? { model: event.selectedModel } : {}),
     } : {}),
   };
 }
@@ -751,7 +753,14 @@ export async function getProjectWorkspace(ownerId: string, projectId: string, re
     SELECT jsonb_build_object(
       'id',recent.id,'event_type',recent.event_type,'task_id',recent.task_id,
       'actor_type',recent.actor_type,'actor_id',recent.actor_id,
-      'payload',recent.payload,'occurred_at',recent.occurred_at,'actors',actors.actors
+      'payload',recent.payload,'occurred_at',recent.occurred_at,'actors',actors.actors,
+      -- The model an agent message was written with: its job's selection (0071).
+      -- The payload's model is the runtime profile's, "selected per task" when
+      -- the assignment chooses it.
+      'selected_model',(SELECT s.model FROM runtime_job_selections s
+        WHERE recent.event_type='chat.agent_message' AND s.job_id=NULLIF(recent.payload->>'job_id','')::bigint
+          AND NOT EXISTS (SELECT 1 FROM runtime_job_selections later WHERE later.supersedes=s.id)
+        LIMIT 1)
     )::text FROM (
       SELECT e.id,e.event_type,e.task_id,e.run_id,e.actor_type,e.actor_id,e.payload,e.occurred_at,e.conversation_sequence
       FROM domain_events e
@@ -780,7 +789,8 @@ export async function getProjectWorkspace(ownerId: string, projectId: string, re
       'implementation.blocked','run.input_requested','revision.started','revision.completed')
     ORDER BY recent.conversation_sequence;
   `, { project_id: projectId, conversation_id: activeTask.conversationId }) : [];
-  const activeEvents = conversationEventRows.map((row) => ({ ...toEvent(row), actors: (row.actors ?? undefined) as Json | undefined }));
+  const activeEvents = conversationEventRows.map((row) => ({ ...toEvent(row), actors: (row.actors ?? undefined) as Json | undefined,
+    selectedModel: typeof row.selected_model === "string" ? row.selected_model : undefined }));
   const hasInitialMessage = activeEvents.some((event) => event.eventType === "chat.user_message");
   const messages = conversationMessages(activeEvents, activeTask ?? undefined);
   if (activeTask && !hasInitialMessage) messages.unshift({ id: `objective-${activeTask.id}`, role: "user", author: "You", content: activeTask.objective, occurredAt: activeTask.createdAt, eventType: "task.objective" });
