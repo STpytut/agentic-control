@@ -53,6 +53,11 @@
 		max_size {$INFRA_COD_MAX_BODY:5MB}
 	}
 
+	# The post-update self-test is the host's own call (apps/web/src/lib/selftest.ts):
+	# `infra-cod update` asks 127.0.0.1:3100 directly. It is never served from here.
+	@selftest path /api/control-plane/selftest
+	respond @selftest 404
+
 	reverse_proxy 127.0.0.1:3100 {
 		# The panel is a separate unit and may be restarting when Caddy is already
 		# up. Retrying briefly turns that into a slow response instead of a 502 the
