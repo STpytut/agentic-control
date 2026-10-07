@@ -328,6 +328,14 @@
     "0136_claude_panel_login.sql": {
       "previousReleaseCompatible": true,
       "note": "Adds claude_login_sessions and its functions; nothing the previous release reads changes."
+    },
+    "0137_catalog_keep_unread_sources.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Replaces complete_catalog_refresh with a form taking a fifth, defaulted argument (the sources not read); the previous release's four-argument call resolves to it and keeps its meaning."
+    },
+    "0138_publish_on_approval.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds two nullable columns to publish_preparations, request_publish_on_approval and a trigger that fires only when they are set; the previous release never sets them."
     }
   }
 }

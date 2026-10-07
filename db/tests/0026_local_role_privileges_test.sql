@@ -663,6 +663,10 @@ INSERT INTO infra_web_allowlist(signature) VALUES
   -- and the broker's functions are not granted.
   ('request_publish(p_preparation_id uuid, p_owner_id uuid, p_actor text, p_correlation_id text)'),
   ('retry_publish_intent(p_intent_id uuid, p_attempt integer, p_owner_id uuid, p_actor text, p_correlation_id text)'),
+  -- 0138: "Approve & open PR", the same operator's publish asked with the
+  -- approval. It checks the owner itself and publishes only through
+  -- request_publish; the preparations table is not granted for writing.
+  ('request_publish_on_approval(p_project_id uuid, p_task_id uuid, p_owner_id uuid, p_actor text, p_correlation_id text)'),
   -- 0088 (sprint C U1): read-only. The four readiness states of every
   -- assignment of a project, checking the owner itself; it reads
   -- provider_connections, which infra_web may not, so it is SECURITY DEFINER.
