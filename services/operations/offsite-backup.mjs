@@ -17,7 +17,7 @@
 // OFFSITE_SECRET_ACCESS_KEY in the environment.
 
 import { createReadStream, createWriteStream } from "node:fs";
-import { mkdir, readFile, stat } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, stat } from "node:fs/promises";
 import { request } from "node:https";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -28,7 +28,10 @@ import { listedObjects, sha256Hex, signRequest } from "./s3-sigv4.mjs";
 
 const backupRoot = process.env.INFRA_BACKUP_ROOT ?? "/var/lib/infra-cod-backups";
 const privateKeyPath = process.env.OPENCODE_BROKER_PRIVATE_KEY_PATH ?? "/etc/infra-cod/opencode/broker-private.pem";
-const KEEP = Number(process.env.INFRA_OFFSITE_KEEP ?? 14);
+const KEEP = Number(process.env.INFRA_OFFSITE_KEEP || 14);
+// A retention that is not a positive whole number would keep nothing — and
+// delete the copy just made.
+if (!Number.isInteger(KEEP) || KEEP < 1) throw new Error("INFRA_OFFSITE_KEEP must be a whole number of at least 1");
 
 function send({ target, method, key = "", query = "", body = null, payloadHash, headers = {}, out = null }) {
   const objectPath = key ? `/${key.split("/").map(encodeURIComponent).join("/")}` : "";
@@ -48,7 +51,10 @@ function send({ target, method, key = "", query = "", body = null, payloadHash, 
     });
     req.on("timeout", () => req.destroy(new Error(`${method} timed out`)));
     req.on("error", reject);
-    if (body) body.pipe(req);
+    if (body) {
+      body.on("error", (error) => req.destroy(error));
+      body.pipe(req);
+    }
     else req.end();
   });
 }
@@ -96,20 +102,25 @@ async function putFile(t, key, file, sha256) {
 // The newest KEEP backups stay; older ones go, each with its receipt.
 export function objectsToDelete(objects, keep = KEEP) {
   const backups = objects.filter((object) => object.key.endsWith(".gpg"))
-    .sort((a, b) => (a.lastModified < b.lastModified ? 1 : -1));
+    .sort((a, b) => (a.lastModified === b.lastModified ? (a.key < b.key ? 1 : -1) : (a.lastModified < b.lastModified ? 1 : -1)));
   const stale = new Set(backups.slice(keep).map((object) => object.key));
   return objects.filter((object) => stale.has(object.key) || stale.has(object.key.replace(/\.json$/, ""))).map((object) => object.key);
 }
 
+// The pre-update backup also runs through the backup unit, so its OnSuccess=
+// upload can be stopped mid-PUT when the update restarts the target. A PUT is
+// atomic — the bucket has the whole object or none — and the next daily run
+// uploads what was missed.
 async function upload() {
-  const t = await target();
-  if (!t) return { status: "not_configured" };
-  const receipt = JSON.parse(await readFile(path.join(backupRoot, "latest.json"), "utf8"));
-  const name = receipt.encrypted_file;
-  if (!name || name.includes("/")) throw new Error("the newest backup's receipt names no file");
-  if (t.lastObject === `${t.prefix}${name}`) return { status: "already_uploaded", object: t.lastObject };
-  const file = path.join(backupRoot, name);
+  let t = null;
   try {
+    t = await target();
+    if (!t) return { status: "not_configured" };
+    const receipt = JSON.parse(await readFile(path.join(backupRoot, "latest.json"), "utf8"));
+    const name = receipt.encrypted_file;
+    if (!name || name.includes("/")) throw new Error("the newest backup's receipt names no file");
+    if (t.lastObject === `${t.prefix}${name}`) return { status: "already_uploaded", object: t.lastObject };
+    const file = path.join(backupRoot, name);
     const bytes = await putFile(t, `${t.prefix}${name}`, file, receipt.encrypted_sha256);
     const receiptFile = `${file}.json`;
     await putFile(t, `${t.prefix}${name}.json`, receiptFile, sha256Hex(await readFile(receiptFile)));
@@ -121,8 +132,14 @@ async function upload() {
     if (t.fromDatabase) await queryJson(`SELECT record_offsite_upload(:'object',:'bytes'::bigint,NULL);`, { object: `${t.prefix}${name}`, bytes: String(bytes) });
     return { status: "uploaded", object: `${t.prefix}${name}`, bytes, removed: stale.length };
   } catch (error) {
-    const message = String(error?.message ?? error).replaceAll(t.secret, "[redacted]").slice(0, 500);
-    if (t.fromDatabase) await queryJson(`SELECT record_offsite_upload(NULL,NULL,:'error');`, { error: message }).catch(() => undefined);
+    const raw = String(error?.message ?? error);
+    const message = (t?.secret ? raw.replaceAll(t.secret, "[redacted]") : raw).slice(0, 500);
+    // Recorded wherever it failed — an unreadable key or receipt included — so
+    // the panel shows it rather than "Copying". Without the environment's
+    // bucket there is no database row to write.
+    if (!process.env.OFFSITE_ENDPOINT) {
+      await queryJson(`SELECT record_offsite_upload(NULL,NULL,:'error');`, { error: message }).catch(() => undefined);
+    }
     throw new Error(message);
   }
 }
@@ -142,9 +159,20 @@ async function main() {
     if (!t) throw new Error("no off-site bucket is configured");
     await mkdir(dir, { recursive: true, mode: 0o700 });
     for (const file of [name, `${name}.json`]) {
-      const answer = await send({ target: t, method: "GET", key: `${t.prefix}${file}`, payloadHash: sha256Hex(""),
-        out: createWriteStream(path.join(dir, file), { mode: 0o600 }) });
-      if (answer.status !== 200) throw new Error(`fetching ${file} failed: ${complaint(answer)}`);
+      // Into a .part file that must not exist yet, renamed when complete: an
+      // existing copy is never overwritten and a failed fetch leaves nothing.
+      const final = path.join(dir, file);
+      const part = `${final}.part`;
+      const out = createWriteStream(part, { mode: 0o600, flags: "wx" });
+      try {
+        const answer = await send({ target: t, method: "GET", key: `${t.prefix}${file}`, payloadHash: sha256Hex(""), out });
+        if (answer.status !== 200) throw new Error(`fetching ${file} failed: ${complaint(answer)}`);
+        await rename(part, final);
+      } catch (error) {
+        out.destroy();
+        await rm(part, { force: true });
+        throw error;
+      }
     }
     process.stdout.write(`fetched ${name} and its receipt to ${dir}\n`);
   } else {

@@ -48,6 +48,12 @@ BEGIN
     RAISE EXCEPTION 'a success is not recorded: %', get_offsite_backup(v_owner);
   END IF;
 
+  -- A new bucket has none of the old one's copies.
+  PERFORM set_offsite_backup(v_owner, 'https://other.r2.cloudflarestorage.com', 'other-backups', 'a1b2c3d4e5f6a7b8c9d0', v_envelope);
+  IF (offsite_backup_for_upload()->>'last_object') IS NOT NULL OR (offsite_backup_status()->>'last_upload_at') IS NOT NULL THEN
+    RAISE EXCEPTION 'the old bucket''s copy is taken for the new one''s';
+  END IF;
+
   PERFORM disable_offsite_backup(v_owner);
   IF (offsite_backup_status()->>'configured')::boolean THEN RAISE EXCEPTION 'still configured'; END IF;
   RAISE NOTICE 'off-site backup assertions passed';

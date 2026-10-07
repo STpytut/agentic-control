@@ -62,7 +62,8 @@ BEGIN
       p_owner_id)
     ON CONFLICT (id) DO UPDATE SET endpoint=EXCLUDED.endpoint, bucket=EXCLUDED.bucket, access_key_id=EXCLUDED.access_key_id,
       secret_envelope=EXCLUDED.secret_envelope, set_by=EXCLUDED.set_by, set_at=clock_timestamp(),
-      last_attempt_at=NULL, last_error=NULL;
+      -- A new bucket has none of the old one's copies: the next run uploads.
+      last_attempt_at=NULL, last_error=NULL, last_upload_at=NULL, last_object=NULL, last_bytes=NULL;
   EXCEPTION WHEN check_violation THEN
     PERFORM refuse('offsite_backup_invalid', 'the endpoint must be https://<account>.r2.cloudflarestorage.com, the bucket a lowercase bucket name, and the key id its letters and digits', '22023');
   END;

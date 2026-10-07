@@ -19,8 +19,13 @@ export type OffsiteBackup = {
 };
 
 export async function getOffsiteBackup(operatorId: string): Promise<OffsiteBackup | null> {
+  // Only the owner's refusal means "not yours to see"; any other failure is
+  // the database's, and is raised as such.
   const row = await executeJson(`SELECT get_offsite_backup(:'owner_id'::uuid)::text;`, { owner_id: operatorId })
-    .catch(() => null) as Record<string, unknown> | null;
+    .catch((error) => {
+      if ((error as { code?: string })?.code === "42501") return null;
+      throw error;
+    }) as Record<string, unknown> | null;
   if (!row) return null;
   const text = (value: unknown) => (typeof value === "string" ? value : "");
   return {
