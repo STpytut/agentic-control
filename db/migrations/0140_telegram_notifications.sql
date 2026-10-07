@@ -46,7 +46,7 @@ CREATE TABLE telegram_connections (
 CREATE TABLE notification_outbox (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   operator_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  kind text NOT NULL CHECK (kind IN ('approval','question','stopped','pull_request','publish_failed','test')),
+  kind text NOT NULL CHECK (kind IN ('approval','question','stopped','pull_request','publish_failed','health','test')),
   title text NOT NULL CHECK (char_length(title) BETWEEN 1 AND 300),
   body text NOT NULL DEFAULT '' CHECK (char_length(body) <= 1500),
   link_path text CHECK (link_path IS NULL OR link_path ~ '^/[A-Za-z0-9/_?=&.-]*$'),
@@ -294,6 +294,41 @@ CREATE TRIGGER domain_events_notify
     'publish.failed','publish.refused'))
   EXECUTE FUNCTION notify_domain_event();
 
+-- The host's health, from the snapshot the health timer takes every minute:
+-- what needs the operator — a critical alert (a stopped service, a stale
+-- backup or restore drill), a disk filling up (it filled on 2026-10-01), an
+-- agent signed out (Claude's token expired on 2026-10-07 and teams stopped).
+-- Each distinct alert is sent at most once a day, to every owner with Telegram.
+CREATE FUNCTION notify_health_alerts(p_alerts jsonb)
+RETURNS integer LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO control_plane, public, extensions, pg_temp
+AS $$
+DECLARE v_alert jsonb; v_owner uuid; v_count integer := 0; v_day text := to_char(clock_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD');
+BEGIN
+  IF p_alerts IS NULL OR jsonb_typeof(p_alerts) <> 'array' THEN RETURN 0; END IF;
+  FOR v_alert IN SELECT a FROM jsonb_array_elements(p_alerts) a
+    WHERE a->>'severity' = 'critical' OR a->>'code' IN ('disk_usage_high','runtime_not_authenticated')
+  LOOP
+    FOR v_owner IN SELECT c.operator_id FROM telegram_connections c WHERE c.status IN ('awaiting_chat','connected') LOOP
+      INSERT INTO notification_outbox(operator_id, kind, title, body, link_path, dedupe_key)
+      VALUES (v_owner, 'health',
+        CASE v_alert->>'code'
+          WHEN 'disk_usage_high' THEN 'The server''s disk is filling up'
+          WHEN 'runtime_not_authenticated' THEN 'An agent is signed out'
+          WHEN 'service_inactive' THEN 'A service on the server stopped'
+          WHEN 'backup_stale' THEN 'The backup is out of date'
+          WHEN 'restore_drill_stale' THEN 'The restore drill is out of date'
+          ELSE 'The server needs attention' END,
+        left(COALESCE(v_alert->>'message',''),600),
+        CASE WHEN v_alert->>'code' = 'runtime_not_authenticated' THEN '/settings/connections' ELSE '/settings/runtimes' END,
+        'health:' || COALESCE(v_alert->>'code','') || ':' || md5(COALESCE(v_alert->>'message','')) || ':' || v_day)
+      ON CONFLICT (operator_id, dedupe_key) DO NOTHING;
+      IF FOUND THEN v_count := v_count + 1; END IF;
+    END LOOP;
+  END LOOP;
+  RETURN v_count;
+END $$;
+
 -- --------------------------------------------------------------- grants
 
 REVOKE ALL ON telegram_connections, notification_outbox FROM PUBLIC;
@@ -301,9 +336,10 @@ REVOKE ALL ON FUNCTION set_telegram_bot(uuid,jsonb), get_telegram_connection(uui
   send_telegram_test(uuid), telegram_connections_to_serve(), record_telegram_bot(uuid,text),
   fail_telegram_bot(uuid,text), record_telegram_chat(uuid,text,bigint,text), claim_notifications(text,integer,interval),
   complete_notification(bigint,text), fail_notification(bigint,text,text),
-  enqueue_notification(uuid,uuid,text,text,text,text), notify_task_awaiting_approval(), notify_domain_event() FROM PUBLIC;
+  enqueue_notification(uuid,uuid,text,text,text,text), notify_task_awaiting_approval(), notify_domain_event(),
+  notify_health_alerts(jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION set_telegram_bot(uuid,jsonb), get_telegram_connection(uuid), disconnect_telegram(uuid),
   send_telegram_test(uuid) TO infra_web;
 GRANT EXECUTE ON FUNCTION telegram_connections_to_serve(), record_telegram_bot(uuid,text), fail_telegram_bot(uuid,text),
   record_telegram_chat(uuid,text,bigint,text), claim_notifications(text,integer,interval),
-  complete_notification(bigint,text), fail_notification(bigint,text,text) TO infra_worker;
+  complete_notification(bigint,text), fail_notification(bigint,text,text), notify_health_alerts(jsonb) TO infra_worker;

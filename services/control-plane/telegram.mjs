@@ -33,7 +33,7 @@ export function looksLikeBotToken(token) {
   return /^\d{5,15}:[A-Za-z0-9_-]{30,64}$/.test(String(token ?? ""));
 }
 
-const ICONS = { approval: "🟡", question: "❓", stopped: "🔴", pull_request: "🟢", publish_failed: "🔴", test: "✅" };
+const ICONS = { approval: "🟡", question: "❓", stopped: "🔴", pull_request: "🟢", publish_failed: "🔴", health: "🛠", test: "✅" };
 
 // Plain text, not Markdown: a project name or an agent's question with an
 // underscore would otherwise break the message.

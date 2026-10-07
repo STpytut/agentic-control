@@ -214,6 +214,10 @@ await queryJson(
   RUNTIME_HEALTH_UPSERT_SQL,
   { status: snapshot.status, snapshot: JSON.stringify(snapshot), observed_at: snapshot.observed_at },
 );
+// What needs the operator goes to Telegram (0140), once a day per alert. A
+// schema before 0140 has no such function; the snapshot is recorded either way.
+await queryJson(`SELECT notify_health_alerts(:'alerts'::jsonb)::text;`, { alerts: JSON.stringify(alerts) })
+  .catch((error) => process.stderr.write(`${JSON.stringify({ type: "health.notify_failed", error: String(error?.message ?? error).slice(0, 200) })}\n`));
 process.stdout.write(`${JSON.stringify(snapshot)}\n`);
 if (healthStatus === 2) process.exitCode = 1;
 

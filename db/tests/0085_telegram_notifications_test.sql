@@ -67,6 +67,15 @@ BEGIN
   PERFORM complete_notification((v_claimed->0->>'id')::bigint, 'notifier-test');
   IF (SELECT status FROM notification_outbox WHERE id=(v_claimed->0->>'id')::bigint) <> 'sent' THEN RAISE EXCEPTION 'not sent'; END IF;
 
+  -- Health: a critical alert and a disk filling up are sent, once a day each;
+  -- a warning the operator cannot act on is not.
+  IF notify_health_alerts('[{"severity":"critical","code":"service_inactive","message":"infra-cod-web.service is inactive"},
+      {"severity":"warning","code":"disk_usage_high","message":"root filesystem is 91% full"},
+      {"severity":"warning","code":"runtime_not_provisioned","message":"opencode is not provisioned"}]') <> 2
+     OR notify_health_alerts('[{"severity":"critical","code":"service_inactive","message":"infra-cod-web.service is inactive"}]') <> 0 THEN
+    RAISE EXCEPTION 'health notifications: %', (SELECT jsonb_agg(title) FROM notification_outbox WHERE operator_id=v_owner AND kind='health');
+  END IF;
+
   -- A connected bot whose token was revoked fails without breaking a CHECK,
   -- and setting a new token starts over.
   PERFORM fail_telegram_bot(v_owner, 'revoked');
