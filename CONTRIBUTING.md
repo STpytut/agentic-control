@@ -13,8 +13,17 @@ person, so the most useful contributions right now are:
 ## Before a pull request
 
 1. **Sign the [Contributor License Agreement](CLA.md).** The CLA check on your
-   first pull request asks for it. It lets the project stay AGPL-3.0 while also
-   being offered under a commercial license.
+   first pull request asks for it, once. In short:
+   - **You keep the copyright** to your contribution. The CLA is a license,
+     not a transfer.
+   - **It lets the project offer a commercial license** next to AGPL-3.0.
+     That is how the maintainer can fund the work, and it needs the right to
+     relicense every line, including yours.
+   - **Your contribution stays open.** It ships in a public AGPL-3.0
+     release, and a release made under AGPL-3.0 stays available under it.
+
+   If that does not suit you, an issue that describes the bug or the change
+   is just as welcome.
 2. **Run the suites.** `scripts/run-suites-in-container.sh` runs them in the same
    environment as CI. It tests the committed `HEAD`, so commit first.
 3. **Keep the change in one pull request.** A database change is a new numbered
