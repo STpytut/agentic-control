@@ -45,6 +45,9 @@ export function claudeAliasEntries(connection) {
 // is offered beside the aliases — a list that stays small enough to be checked
 // automatically — and every one is checked before it is offered, like any
 // model. A list that cannot be read leaves the aliases.
+// The source of the models the Claude list names, as the catalog records it.
+export const CLAUDE_LISTED_SOURCE = "anthropic_models";
+
 export function claudeListedEntries(models, connection) {
   const newest = new Map();
   for (const model of Array.isArray(models) ? models : []) {
@@ -57,7 +60,18 @@ export function claudeListedEntries(models, connection) {
     ...claudeAliasEntries(connection)[0],
     model_id: model.id,
     display_name: normalizeString(model.display_name, 200) || model.id,
-    discovery_source: "anthropic_models",
+    discovery_source: CLAUDE_LISTED_SOURCE,
   }));
 }
 
+
+// What one refresh of a Claude connection discovers: the aliases always, and
+// the listed models when the list was read. A list that could not be read (an
+// expired token answers {"error":"expired"}) names its source as unread, and
+// the refresh's end leaves the models it listed before as they were (0137): a
+// list not read says nothing about them.
+export function claudeDiscovery(answer, connection) {
+  const aliases = claudeAliasEntries(connection);
+  if (!Array.isArray(answer?.models)) return { entries: aliases, unreadSources: [CLAUDE_LISTED_SOURCE] };
+  return { entries: [...aliases, ...claudeListedEntries(answer.models, connection)], unreadSources: [] };
+}

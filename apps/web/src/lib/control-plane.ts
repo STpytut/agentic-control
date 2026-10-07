@@ -14,6 +14,8 @@ export type ActionTarget = {
   // dismissal answers, and the reason from the vocabulary.
   attempt?: number;
   failureReason?: string;
+  // A review whose project the platform can publish (0138): offer "Approve & open PR".
+  canPublish?: boolean;
   title: string;
   description: string;
   time: string;

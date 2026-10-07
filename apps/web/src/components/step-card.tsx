@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { cx } from "@agentic/design-system";
+import type { TaskChanges } from "@/lib/product-data";
 
 // The chat's work steps in one line (Stage 12 N2): Plan → Implementation →
 // Review → Approve → Publish, read from its newest task's status and, for a
@@ -35,7 +36,24 @@ const mark: Record<StepState, string> = { done: "✓", current: "●", stopped: 
 const tone: Record<StepState, string> = { done: "text-success font-medium", current: "text-warning font-medium", stopped: "text-danger font-medium", waiting: "text-muted" };
 const word: Record<StepState, string> = { done: "done", current: "in progress", stopped: "stopped", waiting: "not started" };
 
-export function StepCard({ states, executor, files, action }: { states: StepState[]; executor?: string; files?: number; action?: ReactNode }) {
+const SHOWN_FILES = 6;
+
+// The reviewed diff's files under the steps, so the decision to approve does
+// not start with opening another tab to see what changed.
+function ChangedFiles({ changes }: { changes: TaskChanges }) {
+  const shown = changes.files.slice(0, SHOWN_FILES);
+  return <div className="basis-full">
+    <ul className="m-0 grid list-none gap-0.5 p-0">
+      {shown.map((file) => <li key={file.path} className="type-meta flex min-w-0 items-baseline gap-2">
+        <code className="type-mono-small min-w-0 flex-1 truncate" title={file.path}>{file.path}</code>
+        <span className="shrink-0 tabular-nums"><span className="text-success">+{file.additions}</span> <span className="text-danger">−{file.deletions}</span></span>
+      </li>)}
+    </ul>
+    {changes.files.length > SHOWN_FILES && <p className="type-meta mt-0.5 text-muted">and {changes.files.length - SHOWN_FILES} more</p>}
+  </div>;
+}
+
+export function StepCard({ states, executor, files, changes, action }: { states: StepState[]; executor?: string; files?: number; changes?: TaskChanges | null; action?: ReactNode }) {
   return <section aria-label="Work steps" className="mb-6 ml-11 flex min-w-0 flex-wrap items-center gap-x-3.5 gap-y-2 rounded-lg border border-line bg-canvas px-4 py-3 phone:ml-0 phone:px-3">
     <ol className="type-meta m-0 flex min-w-0 list-none flex-wrap items-center gap-x-1.5 gap-y-1 p-0">
       {STEPS.map((step, index) => <li key={step} className="flex items-center gap-1.5">
@@ -46,5 +64,6 @@ export function StepCard({ states, executor, files, action }: { states: StepStat
     <span className="flex-1"/>
     {(executor || files !== undefined) && <span className="type-meta min-w-0 text-ink/80">{[executor ? `Executor · ${executor}` : "", files !== undefined ? `${files} file${files === 1 ? "" : "s"}` : ""].filter(Boolean).join(" · ")}</span>}
     {action}
+    {changes && changes.files.length > 0 && <ChangedFiles changes={changes}/>}
   </section>;
 }

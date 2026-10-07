@@ -166,6 +166,12 @@ function unpublishedOf(value: unknown): WorkspaceState["unpublished"] {
   };
 }
 
+export type TaskChanges = {
+  additions: number;
+  deletions: number;
+  files: Array<{ path: string; status: string; additions: number; deletions: number }>;
+};
+
 export type WorkspaceState = {
   branch: string;
   headSha: string;
@@ -243,6 +249,9 @@ export type ProjectWorkspace = {
   publishState: PublishState;
   // Files in the active task's latest reviewed diff; null before its first review.
   taskFiles: number | null;
+  // That diff's files with their line counts, for the step card; null before
+  // its first review.
+  taskChanges: TaskChanges | null;
 };
 
 const emptyWorkspaceState: WorkspaceState = {
@@ -464,7 +473,7 @@ function actorName(event: EventSummary, side: "from" | "to", fallback: string) {
 
 // The names a workflow event falls back to when its own row does not carry
 // them: the sides of the conversation's latest handoff.
-type Sides = { orchestrator: string; executor: string };
+type Sides = { orchestrator: string; executor: string; revision?: boolean };
 
 function contentForEvent(event: EventSummary, task?: TaskSummary, sides: Sides = { orchestrator: "The orchestrator", executor: "the executor" }) {
   const payload = event.payload;
@@ -475,7 +484,9 @@ function contentForEvent(event: EventSummary, task?: TaskSummary, sides: Sides =
   // Each line says who did what to whom, in the roles the team plays: the
   // orchestrator plans and reviews, the executor writes the code.
   const labels: Record<string, string> = {
-    "implementation.requested": `${from} handed the work to ${to} to implement.`,
+    // After a review sent the work back, the next handoff is the revision, not
+    // a new piece of work.
+    "implementation.requested": sides.revision ? `${from} handed the requested changes to ${to}.` : `${from} handed the work to ${to} to implement.`,
     "implementation.started": `${to} started implementing in the project workspace.`,
     "implementation.completed": `${to} finished and handed the work back for review.`,
     "implementation.blocked": `${to} reported a blocker.`,
@@ -541,7 +552,10 @@ export function conversationMessages(events: EventSummary[], task?: TaskSummary)
     const actors = (event.actors ?? {}) as Json;
     if (actors.from_runtime) sides.orchestrator = runtimeLabel(String(actors.from_runtime));
     if (actors.to_runtime) sides.executor = runtimeLabel(String(actors.to_runtime));
-    return interactionMessage(event, sensitive) ?? messageFromEvent(event, task, { ...sides });
+    const message = interactionMessage(event, sensitive) ?? messageFromEvent(event, task, { ...sides });
+    if (event.eventType === "changes.requested") sides.revision = true;
+    if (event.eventType === "implementation.requested" || event.eventType === "chat.user_message") sides.revision = false;
+    return message;
   });
 }
 
@@ -635,7 +649,9 @@ function getAttentionRows(ownerId: string, projectId: string, taskId: string) {
     // The task's own diff from its review evidence (0131): the step card
     // counts these files, not the project workspace's, which after a publish
     // sits on the base or on another chat's branch.
-    queryJsonRows(`SELECT jsonb_build_object('files',(e.diffstat->>'files_changed')::int)::text
+    queryJsonRows(`SELECT jsonb_build_object('files',(e.diffstat->>'files_changed')::int,
+        'additions',(e.diffstat->>'insertions')::int,'deletions',(e.diffstat->>'deletions')::int,
+        'changed',e.changed_files)::text
       FROM review_evidence e JOIN projects p ON p.id=e.project_id
       WHERE e.project_id=:'project_id'::uuid AND e.task_id=:'task_id'::uuid AND p.owner_id=:'owner_id'::uuid
       ORDER BY e.recorded_at DESC LIMIT 1;`,variables),
@@ -646,14 +662,14 @@ export async function getProjectWorkspace(ownerId: string, projectId: string, re
   if (!hasDatabaseConnection()) {
     const orchestrator = runtimeForRole("orchestrator");
     const task: TaskSummary = { id: "demo-task", title: "Describe the next change", objective: "Use the chat to create and guide a task.", status: "draft", version: 1, agentName: runtimeLabel(orchestrator), orchestratorRuntime: orchestrator, orchestratorModel: "demo-model", activeAgentId: "", acceptanceCriteria: [], followUpOfTaskId: "", conversationId: "demo-conversation", executorAssignmentIds: [], orchestratorAssignmentId: "", createdAt: demoProject.updatedAt, updatedAt: demoProject.updatedAt };
-    return { project: demoProject, tasks: [task], sessions: [], events: [], activeTask: task, messages: [{ id: "demo-message", role: "agent", author: runtimeLabel(orchestrator), content: "Tell me what we should build next. I will turn the conversation into a task contract and coordinate implementation.", occurredAt: demoProject.updatedAt, eventType: "chat.agent_message" }], agentRoster: [], taskActivity: null, usage: [], taskUsage: null, workspaceState: emptyWorkspaceState, attention: [], publishState: null, taskFiles: null };
+    return { project: demoProject, tasks: [task], sessions: [], events: [], activeTask: task, messages: [{ id: "demo-message", role: "agent", author: runtimeLabel(orchestrator), content: "Tell me what we should build next. I will turn the conversation into a task contract and coordinate implementation.", occurredAt: demoProject.updatedAt, eventType: "chat.agent_message" }], agentRoster: [], taskActivity: null, usage: [], taskUsage: null, workspaceState: emptyWorkspaceState, attention: [], publishState: null, taskFiles: null, taskChanges: null };
   }
   const projectRows = await queryJsonRows(`
     SELECT jsonb_build_object(
       'id',p.id,'name',p.name,'slug',p.slug,'status',p.status,
       'repository_url',p.repository_url,'workspace_path',p.workspace_path,
       'default_branch',p.default_branch,'settings',p.settings,'updated_at',p.updated_at,
-      'version',p.version,
+      'version',p.version,'credential_mode',p.credential_mode,
       'task_count',(SELECT count(*) FROM tasks t WHERE t.project_id=p.id),
       'attention_count',(SELECT count(*) FROM tasks t WHERE t.project_id=p.id AND t.status='needs_attention')
     )::text FROM projects p WHERE p.id=:'project_id'::uuid
@@ -858,10 +874,17 @@ export async function getProjectWorkspace(ownerId: string, projectId: string, re
   const attention: ActionTarget[] = [];
   let publishState: PublishState = null;
   let taskFiles: number | null = null;
+  let taskChanges: TaskChanges | null = null;
   if (activeTask) {
     const [approvalRows,interactionRows,incidentRows,publishRows,evidenceRows] = attentionRows;
     const reviewed = evidenceRows?.[0]?.files;
     if (typeof reviewed === "number" && Number.isFinite(reviewed)) taskFiles = reviewed;
+    const evidence = evidenceRows?.[0];
+    if (evidence && Array.isArray(evidence.changed)) taskChanges = {
+      additions: Number(evidence.additions ?? 0), deletions: Number(evidence.deletions ?? 0),
+      files: (evidence.changed as Json[]).map((file) => ({ path: String(file.path ?? ""), status: String(file.status ?? ""),
+        additions: Number(file.added ?? 0), deletions: Number(file.deleted ?? 0) })).filter((file) => file.path),
+    };
     for (const row of approvalRows) attention.push({ type: "approval", id: String(row.id), projectId, taskId: activeTask.id,
       taskVersion: activeTask.version, title: `${String(row.action_type).replaceAll("_"," ")} approval`,
       description: "A protected action is waiting for your decision.", time: String(row.requested_at) });
@@ -903,8 +926,11 @@ export async function getProjectWorkspace(ownerId: string, projectId: string, re
           String(row.failure_message ?? "")].filter(Boolean).join(" — ") || "The publish did not complete.",
         time: String(row.finished_at ?? activeTask.updatedAt) });
     }
+    // Only a GitHub App repository is published by the platform (0085): the
+    // card offers "Approve & open PR" for those.
     if (activeTask.status === "awaiting_review") attention.push({ type: "review", id: activeTask.id, projectId,
       taskId: activeTask.id, taskVersion: activeTask.version, reviewerAgentId: activeTask.activeAgentId,
+      canPublish: projectRows[0]?.credential_mode === "github_app",
       title: "Ready for your approval",
       description: `${activeTask.orchestratorRuntime ? runtimeLabel(activeTask.orchestratorRuntime) : "The orchestrator"} reviewed the changes. Check the diff, then approve them or ask for changes. Once approved, you can publish them to GitHub as a pull request.`,
       time: activeTask.updatedAt });
@@ -923,6 +949,7 @@ export async function getProjectWorkspace(ownerId: string, projectId: string, re
     attention,
     publishState: activeTask?.status === "approved" ? publishState : null,
     taskFiles,
+    taskChanges,
     agentRoster: rosterRows.map((row) => {
       const runtimeType = String(row.runtime_type);
       return {
