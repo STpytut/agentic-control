@@ -26,6 +26,16 @@ release through GitHub Actions, for when the minutes are there.
 
 ---
 
+## 0. One command
+
+`scripts/release.sh <version> --host <ssh host> [--key <minisign secret key>]`
+runs sections 1–7 below in order on the merged `main`: the gate (skipped when
+this exact tree already passed it), the tag, the container build and its
+content check, the signature — it prints the minisign command and waits for the
+`.minisig`, never running minisign or reading the key — the upload, and
+`infra-cod update`. It stops at the first failure and pushes nothing. The
+sections below are what it does, for when one step has to be done by hand.
+
 ## 1. The gates, before the tag
 
 One command, which is the whole offline gate — the suites below plus the lease
