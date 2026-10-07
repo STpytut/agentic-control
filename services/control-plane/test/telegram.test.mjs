@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createCipheriv, generateKeyPairSync, publicEncrypt, constants, randomBytes } from "node:crypto";
-import { decryptBrokerEnvelope, linkedChat, looksLikeBotToken, nextOffset, notificationText } from "../telegram.mjs";
+import { decryptBrokerEnvelope, linkedChat, looksLikeBotToken, nextOffset, notificationText, startsWithoutCode } from "../telegram.mjs";
 
 const TOKEN = "123456789:AAH-fake_token_for_tests_only_0123456789";
 
@@ -51,4 +51,15 @@ test("a notification is plain text with a link to the chat", () => {
     link_path: "/projects/p?task=t" }, "panel.example");
   assert.equal(text, "🟡 Needs your approval\n\nFocus Timer · Add a reset_today button\n\nhttps://panel.example/projects/p?task=t");
   assert.equal(notificationText({ kind: "test", title: "Hi", body: "" }, ""), "✅ Hi");
+});
+
+test("a /start without the code is answered once per chat; the right one is not", () => {
+  const updates = [
+    { update_id: 1, message: { text: "/start", chat: { id: 7 } } },
+    { update_id: 2, message: { text: "/start", chat: { id: 7 } } },
+    { update_id: 3, message: { text: "/start@acpmybot", chat: { id: 8 } } },
+    { update_id: 4, message: { text: "/start abc123abc123abc1", chat: { id: 9 } } },
+    { update_id: 5, message: { text: "hello", chat: { id: 10 } } },
+  ];
+  assert.deepEqual(startsWithoutCode(updates, "abc123abc123abc1"), [7, 8]);
 });

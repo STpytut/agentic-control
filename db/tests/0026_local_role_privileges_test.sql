@@ -675,6 +675,11 @@ INSERT INTO infra_web_allowlist(signature) VALUES
   ('get_telegram_connection(p_owner_id uuid)'),
   ('disconnect_telegram(p_owner_id uuid)'),
   ('send_telegram_test(p_owner_id uuid)'),
+  -- 0141: where the off-site backups go, owner-only. The secret arrives as the
+  -- browser's broker envelope; the uploader's functions are not granted.
+  ('set_offsite_backup(p_owner_id uuid, p_endpoint text, p_bucket text, p_access_key_id text, p_envelope jsonb)'),
+  ('get_offsite_backup(p_owner_id uuid)'),
+  ('disable_offsite_backup(p_owner_id uuid)'),
   -- 0088 (sprint C U1): read-only. The four readiness states of every
   -- assignment of a project, checking the owner itself; it reads
   -- provider_connections, which infra_web may not, so it is SECURITY DEFINER.

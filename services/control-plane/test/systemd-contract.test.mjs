@@ -64,11 +64,17 @@ test("every service is a member of the target, and the target names it", () => {
       .map((name) => (/^Unit=(.+)$/m.exec(readFileSync(path.join(unitsDirectory, name), "utf8"))?.[1] ?? "").trim())
       .filter(Boolean),
   );
+  // So is a oneshot another unit starts when it succeeds (the off-site copy
+  // after a backup, 0141): it runs after that unit, not at every boot.
+  const triggered = new Set();
+  for (const name of readdirSync(unitsDirectory).filter((file) => file.endsWith(".service"))) {
+    for (const match of readFileSync(path.join(unitsDirectory, name), "utf8").matchAll(/^OnSuccess=(.+)$/gm)) triggered.add(match[1].trim());
+  }
 
   for (const name of partOfTarget) {
     assert.deepEqual(field(name, "PartOf"), ["infra-cod.target"], `${name} is not part of the target`);
-    if (timerDriven.has(name)) {
-      assert.ok(!wanted.includes(name), `${name} is timer-driven and must not start with the target`);
+    if (timerDriven.has(name) || triggered.has(name)) {
+      assert.ok(!wanted.includes(name), `${name} is started by a timer or another unit and must not start with the target`);
     } else {
       assert.ok(wanted.includes(name), `the target does not pull in ${name}`);
     }
@@ -305,7 +311,8 @@ test("every unit runs a node binary it declares, from the release directory", ()
     // The runtime update pass is the one oneshot that runs for minutes: a
     // qualification, or a promotion waiting for the runtime to be idle (0127).
     if (one(name, "Type") === "oneshot") {
-      const bound = name === "infra-cod-runtime-update.service" ? "45min" : "120";
+      // The off-site upload carries a backup of a few hundred megabytes (0141).
+      const bound = name === "infra-cod-runtime-update.service" ? "45min" : name === "infra-cod-offsite-backup.service" ? "30min" : "120";
       assert.deepEqual(field(name, "TimeoutStartSec"), [bound], `${name} has no bounded start timeout`);
     } else {
       assert.deepEqual(field(name, "TimeoutStopSec"), ["20"], `${name} has no 20s stop timeout`);

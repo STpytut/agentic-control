@@ -114,6 +114,8 @@ export function TelegramCard({ initial }: { initial: TelegramConnection }) {
     {status === "awaiting_chat" && link && <Notice tone="info" className="mt-3.5 grid gap-2">
       <strong className="font-medium">Last step: open your bot and press Start</strong>
       <a className="inline-flex min-h-8 w-fit items-center font-medium underline underline-offset-2" href={link} target="_blank" rel="noreferrer">Open @{initial.botUsername}</a>
+      <span>If Telegram opens a chat without a Start button, send the bot this message instead:</span>
+      <code className="type-mono-small w-fit select-all rounded-sm bg-canvas px-2 py-1">/start {initial.linkCode}</code>
       <span>This page updates once the bot has your chat.</span>
     </Notice>}
 

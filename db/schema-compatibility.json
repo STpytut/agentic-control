@@ -344,6 +344,10 @@
     "0140_telegram_notifications.sql": {
       "previousReleaseCompatible": true,
       "note": "Adds telegram_connections, notification_outbox, their functions, and AFTER triggers on tasks and domain_events that queue a message only for an owner with Telegram set up; nothing the previous release reads or writes changes."
+    },
+    "0141_offsite_backups.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds offsite_backup_target and its functions; nothing the previous release reads or writes changes."
     }
   }
 }

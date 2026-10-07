@@ -50,6 +50,11 @@ http://{$INFRA_COD_HOST:127.0.0.1}:{$INFRA_COD_PORT:8080} {
 		max_size {$INFRA_COD_MAX_BODY:5MB}
 	}
 
+	# The post-update self-test is the host's own call (apps/web/src/lib/selftest.ts):
+	# `infra-cod update` asks 127.0.0.1:3100 directly. It is never served from here.
+	@selftest path /api/control-plane/selftest
+	respond @selftest 404
+
 	reverse_proxy 127.0.0.1:3100 {
 		lb_try_duration 5s
 		lb_try_interval 250ms

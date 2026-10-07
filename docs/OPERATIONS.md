@@ -671,6 +671,45 @@ journalctl -u infra-cod-telegram-notifier.service
 sudo -u postgres psql -d infra_cod -c "SELECT status, kind, attempts, last_error, created_at FROM control_plane.notification_outbox ORDER BY id DESC LIMIT 10;"
 ```
 
+## 16b. Off-site backups (0141, rc.129)
+
+The daily backup is gpg-encrypted on the host. With a bucket set in
+**Settings → Backups**, `infra-cod-offsite-backup.service` (started by the
+backup on success) uploads that encrypted file and its receipt to an
+S3-compatible bucket — Cloudflare R2 by default — checks it is there at full
+size, and keeps the newest 14. The bucket's secret key is stored only as the
+broker envelope the browser made. The health snapshot raises
+`offsite_backup_stale` (critical, sent to Telegram) when no copy has reached
+the bucket in 36 hours.
+
+**Keep the backup passphrase off this host.** The copies are useless without
+`/etc/infra-cod/backup.passphrase`; if the host is lost, so is the copy of the
+passphrase on it. Put it in a password manager once:
+
+```bash
+sudo cat /etc/infra-cod/backup.passphrase
+```
+
+Restoring on a new host, before it has a database to read the bucket from:
+
+```bash
+export OFFSITE_ENDPOINT=https://<account id>.r2.cloudflarestorage.com OFFSITE_BUCKET=<bucket> \
+  OFFSITE_ACCESS_KEY_ID=<key id> OFFSITE_SECRET_ACCESS_KEY=<secret>
+node /opt/infra-cod/current/services/operations/offsite-backup.mjs list
+node /opt/infra-cod/current/services/operations/offsite-backup.mjs fetch <file>.tar.gpg /root/restore
+```
+
+then restore from `/root/restore` as from a local backup, with the passphrase
+put back at `/etc/infra-cod/backup.passphrase`.
+
+Diagnostics:
+
+```bash
+systemctl status infra-cod-offsite-backup.service
+journalctl -u infra-cod-offsite-backup.service
+sudo node /opt/infra-cod/current/services/operations/offsite-backup.mjs list
+```
+
 ## 17. Model catalog, capability gate and runtime selection (7.1D)
 
 Sprint 7.1D is implemented on branch `codex/sprint-7.1-finish`; the planned

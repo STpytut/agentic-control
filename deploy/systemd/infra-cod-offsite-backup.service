@@ -1,0 +1,34 @@
+[Unit]
+Description=infra_cod off-site copy of the newest backup
+# Started by infra-cod-backup.service on success (OnSuccess=), not by a timer:
+# it uploads what that run just wrote. Without a bucket configured it says so
+# and succeeds (0141).
+After=network-online.target postgresql@17-main.service
+Wants=network-online.target
+
+PartOf=infra-cod.target
+
+[Service]
+Type=oneshot
+# root: the backups are root-only (0600), and the bucket's secret arrives as a
+# broker envelope this process opens with the broker's private key.
+User=root
+Group=root
+Environment=CONTROL_PLANE_DB=infra_cod
+EnvironmentFile=-/etc/infra-cod/database.env
+Environment=PGUSER=infra_worker
+WorkingDirectory=/opt/infra-cod/current
+Environment=INFRA_BACKUP_ROOT=/var/lib/infra-cod-backups
+Environment=OPENCODE_BROKER_PRIVATE_KEY_PATH=/etc/infra-cod/opencode/broker-private.pem
+TimeoutStartSec=30min
+ExecStart=/opt/node/bin/node /opt/infra-cod/current/services/operations/offsite-backup.mjs upload
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/var/lib/infra-cod-backups
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH
+LockPersonality=true
+TasksMax=32
+MemoryMax=256M

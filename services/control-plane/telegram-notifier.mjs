@@ -13,7 +13,7 @@
 import { isMain } from "./entrypoint.mjs";
 import { queryJson, closePool } from "./db.mjs";
 import { redactError, runPollLoop, shutdownSignal } from "./worker-loop.mjs";
-import { TELEGRAM_API, decryptBrokerEnvelope, linkedChat, looksLikeBotToken, nextOffset, notificationText, readPrivateKey } from "./telegram.mjs";
+import { TELEGRAM_API, decryptBrokerEnvelope, linkedChat, looksLikeBotToken, nextOffset, notificationText, readPrivateKey, startsWithoutCode } from "./telegram.mjs";
 
 const workerId = process.env.TELEGRAM_NOTIFIER_ID ?? `telegram-notifier-${process.pid}`;
 const pollMs = Number(process.env.TELEGRAM_NOTIFIER_POLL_MS ?? 5_000);
@@ -82,7 +82,18 @@ async function serveConnection(connection) {
       const chat = linkedChat(updates, connection.link_code);
       // The offset moves on only once the link is recorded: a moved offset
       // tells Telegram to drop the /start, and a failed write would lose it.
-      if (!chat) { offsets.set(key, next); return undefined; }
+      if (!chat) {
+        // A /start without the code links nothing; the bot says where the link
+        // is instead of staying silent (the owner pressed Start on rc.128 and
+        // nothing happened).
+        for (const chatId of startsWithoutCode(updates, connection.link_code)) {
+          await telegram(token, "sendMessage", { chat_id: chatId, text:
+            "To link this chat, open the link in the panel: Settings → Notifications → Open the bot. It carries a one-time code; a plain /start does not." })
+            .catch(() => undefined);
+        }
+        offsets.set(key, next);
+        return undefined;
+      }
       await queryJson(`SELECT record_telegram_chat(:'owner'::uuid,:'code',:'chat'::bigint,:'label')::text;`,
         { owner: connection.operator_id, code: connection.link_code, chat: String(chat.chatId), label: chat.label });
       offsets.set(key, next);

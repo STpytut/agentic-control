@@ -21,7 +21,7 @@ import { getOperatorGitHubConnections } from "@/lib/github-connections";
 // their latest chats, and answers only which loaders failed — never data.
 //
 // It is reachable only with the one-time token the update writes to a file
-// only this service can read, and only from the host itself.
+// only root and this service can read; Caddy does not serve its path.
 export const SELFTEST_TOKEN_PATH = process.env.INFRA_COD_SELFTEST_TOKEN_PATH ?? "/run/infra-cod-selftest.token";
 
 export function selftestAuthorized(presented: string | null, path = SELFTEST_TOKEN_PATH) {
