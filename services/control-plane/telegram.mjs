@@ -58,6 +58,21 @@ export function linkedChat(updates, linkCode) {
   return null;
 }
 
+// The chats that sent /start without the panel's code — the bot opened
+// directly, or a chat that had started it before — so the bot can say where
+// the right link is. Each chat once.
+export function startsWithoutCode(updates, linkCode) {
+  const chats = new Set();
+  for (const update of Array.isArray(updates) ? updates : []) {
+    const text = String(update?.message?.text ?? "").trim();
+    const chatId = update?.message?.chat?.id;
+    if (!Number.isSafeInteger(chatId) || !/^\/start(@\w+)?(\s|$)/.test(text)) continue;
+    if (linkCode && text === `/start ${linkCode}`) continue;
+    chats.add(chatId);
+  }
+  return [...chats];
+}
+
 // The next getUpdates offset: one past the last update seen.
 export function nextOffset(updates, current = 0) {
   return (Array.isArray(updates) ? updates : []).reduce((offset, update) =>
