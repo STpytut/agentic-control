@@ -282,6 +282,15 @@ if [ -f "$STATE/web-down" ]; then
 fi
 if [ -f "$STATE/auth-open" ]; then printf '200'; exit 0; fi
 case "$*" in
+  */api/control-plane/selftest*)
+    if [ -f "$STATE/selftest-fails" ]; then
+      WANT=$(cat "$STATE/selftest-fails")
+      CURRENT=$(basename "$(readlink "$PREFIX/opt/infra-cod/current" 2>/dev/null)" 2>/dev/null)
+      if [ -z "$WANT" ] || [ "$WANT" = "$CURRENT" ]; then printf '500'; exit 0; fi
+    fi
+    printf '200'; exit 0 ;;
+esac
+case "$*" in
   */api/control-plane/snapshot*) printf '401'; exit 0 ;;
   */projects*) printf '307'; exit 0 ;;
 esac

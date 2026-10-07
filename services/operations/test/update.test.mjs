@@ -257,6 +257,20 @@ test("a health failure after the switch restarts the previous release, and says 
   assert.match(receipt.error, /did not verify/);
 }));
 
+// rc.127: the processes and /login were healthy while every chat with a review
+// failed on "permission denied". The panel's self-test fails the update.
+test("a panel whose pages fail their self-test is rolled back", options, withHost(async (host) => {
+  const artifact = host.artifact({ version: "0.2.0" });
+  host.setState("selftest-fails", "0.2.0");
+
+  const result = host.cli(host.updateArgs(artifact));
+  assert.equal(result.code, 1);
+  assert.equal(host.currentTarget(), "0.1.0", "current must be back on the release whose pages load");
+  const [receipt] = host.receipts();
+  assert.equal(receipt.outcome, "rolled_back");
+  assert.match(receipt.error, /self-test failed/);
+}));
+
 test("a failed update with an incompatible schema refuses to call a symlink move a rollback", options, withHost(async (host) => {
   const artifact = host.artifact({ version: "0.2.0", migrations: additive, compatibility: incompatible });
   host.setState("web-down", "0.2.0");
