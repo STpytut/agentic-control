@@ -182,6 +182,19 @@ for (const runtime of runtimes) {
   }
 }
 
+// The off-site copy (0141), once one is configured: the host's own backups
+// are no use if the host is what was lost.
+const offsite = await queryJson(`SELECT offsite_backup_status()::text;`).catch(() => null);
+if (offsite?.configured) {
+  const newest = offsite.last_upload_at ?? null;
+  const since = ageSeconds(newest ?? offsite.set_at);
+  if (since > backupMaxHours * 3600) {
+    add("critical", "offsite_backup_stale", newest
+      ? `the newest off-site backup is ${Math.round(since / 3600)} hours old${offsite.last_error ? `: ${offsite.last_error}` : ""}`
+      : `no backup has reached the off-site bucket${offsite.last_error ? `: ${offsite.last_error}` : ""}`);
+  }
+}
+
 const healthStatus = healthStatusOf(alerts);
 const snapshot = { type: "health.snapshot", observed_at: new Date().toISOString(), status: HEALTH_STATUS_NAMES[healthStatus],
   database: state, services, runtimes, disk_percent: diskPercent, backup_age_seconds: backupAgeSeconds, restore_age_seconds: restoreAgeSeconds,

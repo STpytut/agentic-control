@@ -5,6 +5,8 @@ Wants=network-online.target
 Wants=postgresql@17-main.service
 
 PartOf=infra-cod.target
+# Each successful backup is copied off the host when a bucket is set (0141).
+OnSuccess=infra-cod-offsite-backup.service
 
 [Service]
 Type=oneshot

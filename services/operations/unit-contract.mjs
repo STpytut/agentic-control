@@ -43,6 +43,8 @@ export const LONG_RUNNING_SERVICES = [
 // the wrong question for these; `Result=success` is the right one.
 export const ONESHOT_SERVICES = [
   "infra-cod-backup",
+  // Started by the backup on success (OnSuccess=), not by a timer of its own.
+  "infra-cod-offsite-backup",
   "infra-cod-restore-drill",
   "infra-cod-health",
   "infra-cod-runtime-watch",

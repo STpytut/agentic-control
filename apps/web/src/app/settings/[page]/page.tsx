@@ -8,6 +8,8 @@ import { GitHubConnectionCard } from "@/components/github-connection-card";
 import { ClaudeConnectionCard } from "@/components/claude-connection-card";
 import { TelegramCard } from "@/components/telegram-card";
 import { getTelegramConnection } from "@/lib/telegram-connection";
+import { OffsiteBackupCard } from "@/components/offsite-backup-card";
+import { getOffsiteBackup } from "@/lib/offsite-backup";
 import { CodexConnectionCard } from "@/components/codex-connection-card";
 import { OpenCodeConnectionCard } from "@/components/opencode-connection-card";
 import { OperatorAccountCard, type OperatorSessionRow } from "@/components/operator-account-card";
@@ -45,6 +47,7 @@ const PAGES = [
   { id: "runtimes", label: "Runtimes" },
   { id: "usage", label: "Limits & usage" },
   { id: "notifications", label: "Notifications" },
+  { id: "backups", label: "Backups" },
   { id: "projects", label: "Projects" },
 ] as const;
 type PageId = typeof PAGES[number]["id"];
@@ -66,6 +69,7 @@ export default async function SettingsPage({ params, searchParams }: { params: P
   ]);
   const runtimeUpdateRequests = current === "runtimes" ? await getRuntimeUpdateRequests() : [];
   const telegram = current === "notifications" ? await getTelegramConnection(operator.userId) : null;
+  const offsite = current === "backups" ? await getOffsiteBackup(operator.userId) : null;
   const [githubApp, githubManifest] = current === "connections"
     ? await Promise.all([getGitHubAppConfig(), getGitHubAppManifestStatus(operator.userId)])
     : [null, null];
@@ -136,6 +140,11 @@ export default async function SettingsPage({ params, searchParams }: { params: P
       {current === "notifications" && telegram && <>
         <SettingsPageHeader title="Notifications" description="Where the panel tells you that it waits for you."/>
         <div className="max-w-[640px]"><TelegramCard initial={telegram}/></div>
+      </>}
+
+      {current === "backups" && <>
+        <SettingsPageHeader title="Backups" description="The server backs itself up every day; a copy off the server survives losing it."/>
+        <div className="max-w-[640px]">{offsite ? <OffsiteBackupCard initial={offsite}/> : <p className="type-app-body text-muted">Only the owner sets where backups go.</p>}</div>
       </>}
 
       {current === "usage" && <>
