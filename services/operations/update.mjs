@@ -35,6 +35,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 
 import { applyApparmor, applyTmpfiles, declarationOf, readLedger, reconcileInstall } from "./install-reconcile.mjs";
@@ -77,6 +78,8 @@ const BACKUP_ROOT = sys("/var/lib/infra-cod-backups");
 const WEB_ORIGIN = "http://127.0.0.1:3100";
 const LOGIN_PATH = "/login";
 const WEB_PROBE_URL = `${WEB_ORIGIN}${LOGIN_PATH}`;
+const SELFTEST_PATH = "/api/control-plane/selftest";
+const SELFTEST_TOKEN = sys("/run/infra-cod-selftest.token");
 
 const UPDATE_STATE_SCHEMA = "infra-cod/update-state/1";
 
@@ -160,6 +163,37 @@ function probePath(pathname) {
   const result = run("curl", ["-s", "-o", "/dev/null", "-w", "%{http_code}", `${WEB_ORIGIN}${pathname}`], { timeout: 15_000 });
   const status = Number.parseInt(result.stdout, 10);
   return Number.isInteger(status) && status > 0 ? status : null;
+}
+
+// The panel's own data self-test (rc.128): the loaders every page runs, as
+// infra_web, for every owner's projects and latest chats. rc.127 answered
+// /login and failed every chat with a review on "permission denied"; this is
+// what would have caught it, without this command holding an operator
+// credential. A one-time token in a file only root and infra-web can read
+// authorises the one call; the file is gone when it returns.
+//
+// A release older than rc.128 has no self-test and answers 404: that is said,
+// and is not a failure, so a rollback to one still verifies.
+function selfTest() {
+  const token = randomBytes(32).toString("hex");
+  const body = path.join(os.tmpdir(), `infra-cod-selftest-${process.pid}.json`);
+  try {
+    mkdirSync(path.dirname(SELFTEST_TOKEN), { recursive: true });
+    writeFileSync(SELFTEST_TOKEN, `${token}\n`, { mode: 0o640 });
+    if (!HARNESS) run("chown", ["root:infra-web", SELFTEST_TOKEN], { timeout: 10_000 });
+    const result = run("curl", ["-s", "-o", body, "-w", "%{http_code}", "-X", "POST",
+      "-H", `x-infra-cod-selftest: ${token}`, `${WEB_ORIGIN}${SELFTEST_PATH}`], { timeout: 120_000 });
+    const status = Number.parseInt(result.stdout, 10);
+    if (status === 200) return { ok: true, supported: true };
+    if (status === 404) return { ok: true, supported: false };
+    let failures = [];
+    try { failures = JSON.parse(readFileSync(body, "utf8")).failures ?? []; } catch { /* no body */ }
+    return { ok: false, supported: true, status: Number.isInteger(status) ? status : null,
+      failures: failures.slice(0, 5).map((failure) => `${failure.loader}: ${failure.error}`) };
+  } finally {
+    rmSync(SELFTEST_TOKEN, { force: true });
+    rmSync(body, { force: true });
+  }
 }
 
 // Sixty seconds of patience is right for a host whose panel is still booting and
@@ -934,6 +968,17 @@ function verifyLive({ releaseDirectory, reporter, expectVersion, before = null }
       problems.push(`${path_} did not answer`);
     } else if (!acceptable.includes(status)) {
       problems.push(`${path_} answered ${status}; the authenticated surface no longer ${description}`);
+    }
+  }
+
+  if (web.ok) {
+    const test = selfTest();
+    if (!test.ok) {
+      problems.push(`the panel's self-test failed${test.status ? ` (${test.status})` : ""}: ${test.failures?.join("; ") || "no answer"}`);
+    } else if (test.supported) {
+      reporter.log("the panel's self-test passed: every page's data loads");
+    } else {
+      reporter.log("this release has no panel self-test (before rc.128)");
     }
   }
 

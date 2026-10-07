@@ -19,6 +19,7 @@ Wants=infra-cod-codex-account-worker.service
 Wants=infra-cod-opencode-account-worker.service
 Wants=infra-cod-catalog-refresh-worker.service
 Wants=infra-cod-catalog-gate-worker.service
+Wants=infra-cod-telegram-notifier.service
 Wants=infra-cod-project-provisioner.service
 Wants=infra-cod-project-deprovision-worker.service
 Wants=infra-cod-caddy.service

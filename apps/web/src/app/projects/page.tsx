@@ -44,8 +44,11 @@ export default async function ProjectsPage() {
       body: [
         codexConnected ? "Codex is connected." : "Codex: sign in with ChatGPT. Allow it in ChatGPT first: Settings → Security → device code authorization for Codex.",
         claudeConnected ? "Claude Code is connected." : "Claude Code: Sign in with Claude and paste the code it shows.",
-      ].join(" "),
-      done: codexConnected && claudeConnected,
+        // One is enough: every runtime can plan, review and write code. Two let
+        // one review the other's work.
+        agentsDone && !(codexConnected && claudeConnected) ? "One agent is enough to start; a second one lets them check each other." : "",
+      ].filter(Boolean).join(" "),
+      done: agentsDone,
       href: "/settings/connections",
       action: "Connections",
     },

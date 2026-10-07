@@ -40,7 +40,7 @@ function readinessBlockers(readiness: ProjectReadiness | null | undefined, bound
 // task, the same validation and action, with the team as chips under the field
 // and a "Start chat" button; `memberLabels` names each member there (model,
 // the resolved one, the level) where the page knows more than the roster.
-export function ChatComposer({ projectId, taskId, taskStatus, taskVersion, taskOrchestratorAssignmentId = "", taskExecutorAssignmentIds = [], enabled, disabledReason = "Operator authentication is required to send messages", agentRoster = [], readiness = null, variant = "chat", className, memberLabels = {} }: { projectId: string; taskId?: string; taskStatus?: string; taskVersion?: number; taskOrchestratorAssignmentId?: string; taskExecutorAssignmentIds?: string[]; enabled: boolean; disabledReason?: string; agentRoster?: AgentAssignmentSummary[]; readiness?: ProjectReadiness | null; variant?: "chat" | "start"; className?: string; memberLabels?: Record<string, string> }) {
+export function ChatComposer({ projectId, taskId, taskStatus, taskVersion, taskOrchestratorAssignmentId = "", taskExecutorAssignmentIds = [], enabled, disabledReason = "Operator authentication is required to send messages", agentRoster = [], readiness = null, variant = "chat", className, memberLabels = {}, examples = [] }: { examples?: string[]; projectId: string; taskId?: string; taskStatus?: string; taskVersion?: number; taskOrchestratorAssignmentId?: string; taskExecutorAssignmentIds?: string[]; enabled: boolean; disabledReason?: string; agentRoster?: AgentAssignmentSummary[]; readiness?: ProjectReadiness | null; variant?: "chat" | "start"; className?: string; memberLabels?: Record<string, string> }) {
   const start = variant === "start" && !taskId;
   const router = useRouter();
   const orchestrators = agentRoster.filter((item) => item.assignmentRole === "orchestrator" && item.canOrchestrate);
@@ -175,6 +175,14 @@ export function ChatComposer({ projectId, taskId, taskStatus, taskVersion, taskO
           <span className="truncate">{attachment.name}</span>
           <button type="button" className="grid h-8 w-8 shrink-0 place-items-center rounded-xs text-muted transition-colors duration-150 hover:text-ink" onClick={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))} aria-label={`Remove ${attachment.name}`}>×</button>
         </span>)}
+      </div>}
+      {/* A first project's start screen offers a few first tasks (rc.128): a
+          click puts one in the field to edit or send as it is. */}
+      {start && examples.length > 0 && !message.trim() && <div className="flex flex-wrap gap-1.5 pt-2" role="group" aria-label="Example tasks">
+        {examples.map((example) => <button key={example} type="button" onClick={() => setMessage(example)}
+          className="type-meta max-w-full truncate rounded-full border border-dashed border-line-strong px-3 py-1.5 text-left text-ink/80 transition-colors duration-150 hover:border-ink hover:text-ink">
+          {example}
+        </button>)}
       </div>}
       {start && <div className="flex flex-wrap items-center gap-1.5 pt-2" aria-label="The team for this chat" role="group">
         {orchestrators.length > 1

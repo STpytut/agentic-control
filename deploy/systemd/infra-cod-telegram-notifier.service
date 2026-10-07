@@ -1,0 +1,39 @@
+[Unit]
+Description=infra_cod Telegram notifier
+# Sends the operator a Telegram message when a task waits for them (0140). It
+# runs as the OpenCode broker's user because the bot token arrives as the same
+# broker envelope and only that user can read the broker's private key.
+After=network-online.target postgresql@17-main.service
+Wants=network-online.target
+Wants=postgresql@17-main.service
+
+PartOf=infra-cod.target
+
+[Service]
+Type=simple
+User=infra-control
+Group=infra-control
+WorkingDirectory=/opt/infra-cod/current
+Environment=CONTROL_PLANE_DB=infra_cod
+EnvironmentFile=-/etc/infra-cod/database.env
+# INFRA_COD_DOMAIN, for the link in each message.
+EnvironmentFile=-/etc/infra-cod/caddy.env
+Environment=PGUSER=infra_worker
+Environment=TELEGRAM_NOTIFIER_ID=vps-telegram-notifier-1
+Environment=TELEGRAM_NOTIFIER_POLL_MS=5000
+Environment=OPENCODE_BROKER_PRIVATE_KEY_PATH=/etc/infra-cod/opencode/broker-private.pem
+ExecStart=/opt/node/bin/node /opt/infra-cod/current/services/control-plane/telegram-notifier.mjs
+Restart=on-failure
+TimeoutStopSec=20
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+TasksMax=16
+MemoryMax=128M
+
+[Install]
+WantedBy=multi-user.target

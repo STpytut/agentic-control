@@ -644,6 +644,33 @@ npm run test:opencode-account
 npm run db:test:opencode-connections
 ```
 
+## 16a. Telegram notifications (0140, rc.128)
+
+The panel sends the operator a Telegram message when a task needs their
+approval, an agent asks a question, a job is dead-lettered, a pull request
+opens, or a publish fails or is refused. Each message links to the chat.
+
+- The operator makes a bot with @BotFather and pastes its token in
+  **Settings → Notifications**. The browser encrypts it with the OpenCode broker
+  **public** key (the same envelope as OpenCode keys); only the envelope reaches
+  PostgreSQL (`telegram_connections.token_envelope`), and `infra_web` cannot
+  read it back.
+- `infra-cod-telegram-notifier.service` (user `infra-control`, which alone
+  reads `/etc/infra-cod/opencode/broker-private.pem`) checks the token with
+  `getMe`, shows a one-time `t.me/<bot>?start=<code>` link, links the chat that
+  sends that `/start`, and sends `notification_outbox`. A failed send is retried
+  five times with a growing pause; the token is redacted from every error.
+- Messages are queued only for an owner with Telegram set up; Disconnect drops
+  the envelope and anything still unsent.
+
+Diagnostics:
+
+```bash
+systemctl status infra-cod-telegram-notifier.service
+journalctl -u infra-cod-telegram-notifier.service
+sudo -u postgres psql -d infra_cod -c "SELECT status, kind, attempts, last_error, created_at FROM control_plane.notification_outbox ORDER BY id DESC LIMIT 10;"
+```
+
 ## 17. Model catalog, capability gate and runtime selection (7.1D)
 
 Sprint 7.1D is implemented on branch `codex/sprint-7.1-finish`; the planned

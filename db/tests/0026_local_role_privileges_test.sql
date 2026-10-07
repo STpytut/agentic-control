@@ -667,6 +667,14 @@ INSERT INTO infra_web_allowlist(signature) VALUES
   -- approval. It checks the owner itself and publishes only through
   -- request_publish; the preparations table is not granted for writing.
   ('request_publish_on_approval(p_project_id uuid, p_task_id uuid, p_owner_id uuid, p_actor text, p_correlation_id text)'),
+  -- 0140: Telegram notifications. The panel sets the bot token only as the
+  -- browser's broker envelope, reads the connection without it, disconnects,
+  -- and queues a test message; each checks the owner it is given. The notifier's
+  -- functions, which do read the envelope, are not granted.
+  ('set_telegram_bot(p_owner_id uuid, p_envelope jsonb)'),
+  ('get_telegram_connection(p_owner_id uuid)'),
+  ('disconnect_telegram(p_owner_id uuid)'),
+  ('send_telegram_test(p_owner_id uuid)'),
   -- 0088 (sprint C U1): read-only. The four readiness states of every
   -- assignment of a project, checking the owner itself; it reads
   -- provider_connections, which infra_web may not, so it is SECURITY DEFINER.
