@@ -336,6 +336,10 @@
     "0138_publish_on_approval.sql": {
       "previousReleaseCompatible": true,
       "note": "Adds two nullable columns to publish_preparations, request_publish_on_approval and a trigger that fires only when they are set; the previous release never sets them."
+    },
+    "0139_web_reads_changed_files.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Grants infra_web SELECT on review_evidence.changed_files, which the step card reads; no schema change."
     }
   }
 }
