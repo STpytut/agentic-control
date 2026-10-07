@@ -33,18 +33,27 @@ export function ChatMessage({ message, timeLabel, modelLabel }: { message: ChatM
     </article>;
   }
 
-  const avatar = message.role === "user" ? "rounded-full bg-wash text-ink" : "rounded-sm bg-ink text-on-ink";
+  // The operator's own messages sit on the right as a bubble, the agents' on
+  // the left with their name, as in any messenger: who said what reads from
+  // the side before a single word.
+  if (message.role === "user") {
+    return <article className="mb-6 flex flex-col items-end" aria-label={`${message.author}, ${timeLabel}`}>
+      <div className="max-w-[80%] rounded-lg rounded-br-sm bg-wash px-4 py-2.5 phone:max-w-[88%]">
+        <p className={cx("type-app-body whitespace-pre-wrap text-ink [overflow-wrap:anywhere]", !expanded && "line-clamp-12")}>{message.content}</p>
+        {collapsible && <button className="type-meta mt-2 inline-flex min-h-8 items-center font-medium underline-offset-4 hover:underline" type="button" aria-expanded={expanded}
+          onClick={() => setExpanded((current) => !current)}>{expanded ? "Collapse" : "Show full message"}</button>}
+      </div>
+      <time className="type-meta mt-1 text-muted">{timeLabel}</time>
+    </article>;
+  }
+
   const detail = [message.actorRole && ROLE_LABELS[message.actorRole], modelLabel].filter(Boolean).join(" · ");
 
   return <article className="mb-6 grid grid-cols-[32px_minmax(0,1fr)] gap-3">
-    <span className={cx("grid h-8 w-8 place-items-center text-[0.6875rem] font-medium", avatar)}>{message.role === "user" ? "ST" : (message.author.trim()[0] ?? "A").toUpperCase()}</span>
+    <span className="grid h-8 w-8 place-items-center rounded-sm bg-ink text-[0.6875rem] font-medium text-on-ink">{(message.author.trim()[0] ?? "A").toUpperCase()}</span>
     <div className="min-w-0">
       <header className="flex min-h-6 flex-wrap items-center gap-x-2"><strong className="type-meta font-medium">{message.author}</strong>{detail && <span className="type-meta text-muted">{detail}</span>}<time className="type-meta text-muted">{timeLabel}</time></header>
-      {message.role === "agent"
-        ? <div className="message-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown></div>
-        : <p className={cx("type-app-body mt-1 whitespace-pre-wrap text-ink", !expanded && "line-clamp-12")}>{message.content}</p>}
-      {collapsible && <button className="type-meta mt-2 inline-flex min-h-8 items-center font-medium underline-offset-4 hover:underline" type="button" aria-expanded={expanded}
-        onClick={() => setExpanded((current) => !current)}>{expanded ? "Collapse" : "Show full message"}</button>}
+      <div className="message-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown></div>
     </div>
   </article>;
 }

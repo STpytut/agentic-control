@@ -72,7 +72,7 @@ export function WorkflowActions({ action, acceptanceCriteria }: Props) {
       {notice && <Notice role="status" tone={notice.ok ? "success" : "danger"} className="mt-2.5">{notice.text}</Notice>}
       <div className="mt-4 flex flex-wrap gap-2 [&>*]:flex-1 phone:flex-col phone:[&>*]:w-full phone:[&>*]:flex-none">
         {action.type === "review" && mode === "idle" && <>
-          <button type="button" className={primary} disabled={busy} onClick={() => submit({ kind: "review_approve", projectId: action.projectId, taskId: action.taskId, taskVersion: action.taskVersion, summary: "Reviewed and accepted from the control-plane UI" })}>{busy ? "Sending…" : "Approve review"}</button>
+          <button type="button" className={primary} disabled={busy} onClick={() => submit({ kind: "review_approve", projectId: action.projectId, taskId: action.taskId, taskVersion: action.taskVersion, summary: "Reviewed and accepted from the control-plane UI" })}>{busy ? "Sending…" : "Approve changes"}</button>
           <button type="button" className={secondary} disabled={busy} onClick={() => setMode("revision")}>Request changes</button>
         </>}
         {action.type === "review" && mode === "revision" && <>

@@ -5,9 +5,9 @@ import type { ReactNode } from "react";
 import { Badge, ButtonLink, cx } from "@agentic/design-system";
 import type { Operator } from "@/lib/auth";
 import type { ProjectReadiness, ProjectWorkspace, RuntimeReadinessReport } from "@/lib/product-data";
-import type { ProjectTeam } from "@/lib/team";
+import { modelDisplayWithResolved, type ProjectTeam } from "@/lib/team";
 import type { OperatorModels } from "@/lib/models";
-import { modelWithResolved, resolvedModelOf } from "@/lib/models";
+import { resolvedModelOf } from "@/lib/models";
 import type { SidebarChat } from "@/lib/sidebar-data";
 import { runtimeLabel } from "@/lib/runtime-labels";
 import { ControlPlaneShell } from "@/components/control-plane-shell";
@@ -54,7 +54,7 @@ export function memberLabels(roster: ProjectWorkspace["agentRoster"], readiness:
     const model = reading?.modelId || member.model;
     const resolved = entryId ? resolvedModelOf(models, entryId) : null;
     const level = team?.reasoning.members[member.assignmentId]?.level ?? null;
-    return [member.assignmentId, `${model ? modelWithResolved(model, resolved) : runtimeLabel(member.runtimeType)} · ${level ?? "default"}`];
+    return [member.assignmentId, `${model ? modelDisplayWithResolved(team, model, resolved) : runtimeLabel(member.runtimeType)}${level ? ` · reasoning ${level}` : ""}`];
   }));
 }
 
@@ -157,7 +157,7 @@ export function ProjectStart({ operator, workspace, writeEnabled, runtimeReadine
           </SummaryCard>
         </div>
         <p className="type-meta m-0 text-muted">
-          {chats.length} chat{chats.length === 1 ? "" : "s"} · {open.length} open · {workspace.sessions.length} native session{workspace.sessions.length === 1 ? "" : "s"}
+          {chats.length} chat{chats.length === 1 ? "" : "s"} · {open.length} open · {workspace.sessions.length} agent session{workspace.sessions.length === 1 ? "" : "s"}
           {lastEvent ? ` · last event ${relativeTime(lastEvent.occurredAt)}` : ""} · <Link href={`/projects/${project.id}/settings/activity`} className="font-medium text-ink underline-offset-4 hover:underline">Activity</Link> · <Link href={`/projects/${project.id}/chats`} className="font-medium text-ink underline-offset-4 hover:underline">All chats</Link>
         </p>
       </div>

@@ -5,7 +5,8 @@ import type { AssignmentReadiness, ProjectReadiness } from "@/lib/readiness";
 import type { ChatMessage, EventSummary, ProjectSummary, ProjectWorkspace } from "@/lib/product-data";
 import type { ProjectTeam } from "@/lib/team";
 import type { OperatorModels } from "@/lib/models";
-import { modelWithResolved, resolvedModelOf } from "@/lib/models";
+import { resolvedModelOf } from "@/lib/models";
+import { modelDisplayWithResolved } from "@/lib/team";
 import { runtimeLabel } from "@/lib/runtime-labels";
 import { formatTimestamp } from "@/lib/format-timestamp";
 import { ReadinessBlockerNote } from "@/components/assignment-readiness";
@@ -52,7 +53,7 @@ export function TeamTab({ projectId, taskId, readiness, roster, team, models }: 
           const entryId = assignment.entryId ?? teamMember?.entryId ?? "";
           const resolved = entryId ? resolvedModelOf(models, entryId) : null;
           const level = team?.reasoning.members[assignment.assignmentId]?.level ?? null;
-          const model = assignment.modelId ? modelWithResolved(assignment.modelId, resolved) : "";
+          const model = assignment.modelId ? modelDisplayWithResolved(team, assignment.modelId, resolved) : "";
           return <section key={assignment.assignmentId} aria-label={`${roleWord(assignment.role)} readiness`} className="grid min-w-0 gap-0.5 rounded-lg border border-line px-3.5 py-3">
             <div className="flex min-w-0 items-center justify-between gap-2">
               <strong className="type-meta font-semibold">{roleWord(assignment.role)}{assignment.isDefault && assignment.role === "orchestrator" ? " · default" : ""}</strong>
@@ -60,7 +61,7 @@ export function TeamTab({ projectId, taskId, readiness, roster, team, models }: 
             </div>
             <span className="type-meta">{runtimeLabel(assignment.runtime)}{assignment.runtimeVersion ? ` ${assignment.runtimeVersion}` : ""}</span>
             {model
-              ? <span className="type-mono-small min-w-0 [overflow-wrap:anywhere]">{model}</span>
+              ? <span className="type-meta min-w-0 [overflow-wrap:anywhere]" title={assignment.modelId}>{model}</span>
               : <span className="type-meta text-muted">No model chosen for this assignment yet.</span>}
             <span className="type-meta text-muted">reasoning: {level ?? "default"}<span aria-hidden="true"> · </span><MemberTokens assignmentId={assignment.assignmentId}/></span>
             {assignment.blockedBy && <ReadinessBlockerNote blocker={assignment.blockedBy} projectId={projectId}/>}
