@@ -84,7 +84,7 @@ BEGIN
     bot_username=NULL, link_code=NULL, chat_id=NULL, chat_label=NULL, failure_message=NULL,
     leased_by=NULL, leased_until=NULL, updated_at=clock_timestamp();
   PERFORM write_audit_event(NULL,NULL,NULL,'operator',p_owner_id::text,'telegram.bot_set',
-    'telegram_connection',p_owner_id::text,'allowed',NULL,'{}'::jsonb,NULL);
+    'telegram_connection',p_owner_id::text,'allowed',NULL,'{}'::jsonb,'telegram:'||p_owner_id);
   RETURN jsonb_build_object('status','verifying');
 END $$;
 
@@ -111,7 +111,7 @@ BEGIN
   UPDATE notification_outbox SET status='failed', last_error='Telegram was disconnected'
   WHERE operator_id=p_owner_id AND status='pending';
   PERFORM write_audit_event(NULL,NULL,NULL,'operator',p_owner_id::text,'telegram.disconnected',
-    'telegram_connection',p_owner_id::text,'allowed',NULL,'{}'::jsonb,NULL);
+    'telegram_connection',p_owner_id::text,'allowed',NULL,'{}'::jsonb,'telegram:'||p_owner_id);
   RETURN jsonb_build_object('status','disconnected');
 END $$;
 
@@ -162,8 +162,11 @@ RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER
 SET search_path TO control_plane, public, extensions, pg_temp
 AS $$
 BEGIN
+  -- From any live state, a connected one included (a token revoked in
+  -- @BotFather, a bot the operator blocked): the chat goes with it, so the
+  -- panel says what failed instead of "Connected".
   UPDATE telegram_connections SET status='failed', failure_message=left(COALESCE(p_message,'Telegram refused the bot token'),500),
-    updated_at=clock_timestamp()
+    chat_id=NULL, chat_label=NULL, link_code=NULL, updated_at=clock_timestamp()
   WHERE operator_id=p_owner_id AND status IN ('verifying','awaiting_chat','connected');
   RETURN jsonb_build_object('status','failed');
 END $$;
@@ -179,7 +182,7 @@ BEGIN
   WHERE operator_id=p_owner_id AND status='awaiting_chat' AND link_code=p_link_code;
   IF NOT FOUND THEN PERFORM refuse('telegram_not_held', 'the link code does not match a chat waiting to be linked'); END IF;
   PERFORM write_audit_event(NULL,NULL,NULL,'system','telegram-notifier','telegram.chat_linked',
-    'telegram_connection',p_owner_id::text,'allowed',NULL,jsonb_build_object('chat_label',left(p_chat_label,128)),NULL);
+    'telegram_connection',p_owner_id::text,'allowed',NULL,jsonb_build_object('chat_label',left(p_chat_label,128)),'telegram:'||p_owner_id);
   RETURN jsonb_build_object('status','connected');
 END $$;
 

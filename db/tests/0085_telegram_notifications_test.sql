@@ -67,6 +67,14 @@ BEGIN
   PERFORM complete_notification((v_claimed->0->>'id')::bigint, 'notifier-test');
   IF (SELECT status FROM notification_outbox WHERE id=(v_claimed->0->>'id')::bigint) <> 'sent' THEN RAISE EXCEPTION 'not sent'; END IF;
 
+  -- A connected bot whose token was revoked fails without breaking a CHECK,
+  -- and setting a new token starts over.
+  PERFORM fail_telegram_bot(v_owner, 'revoked');
+  IF (get_telegram_connection(v_owner)->>'status') <> 'failed' THEN RAISE EXCEPTION 'a revoked bot is not failed'; END IF;
+  PERFORM set_telegram_bot(v_owner, v_envelope);
+  v_code := record_telegram_bot(v_owner, 'agentic_test_bot')->>'link_code';
+  PERFORM record_telegram_chat(v_owner, v_code, 42, '@owner');
+
   -- Disconnecting drops the envelope and what was still to send.
   PERFORM send_telegram_test(v_owner);
   PERFORM disconnect_telegram(v_owner);

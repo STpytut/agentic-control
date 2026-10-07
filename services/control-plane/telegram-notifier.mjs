@@ -40,11 +40,30 @@ async function telegram(token, method, body, timeoutMs = 15_000) {
   return answer.result;
 }
 
+// A broker key the process cannot read is the host's to fix and is retried;
+// an envelope it cannot open, or one that holds no bot token, will not get
+// better and is the operator's to set again.
+function permanent(message) {
+  const error = new Error(message);
+  error.permanent = true;
+  return error;
+}
+
 function tokenOf(envelope) {
-  const token = decryptBrokerEnvelope(envelope, readPrivateKey(privateKeyPath));
-  if (!looksLikeBotToken(token)) throw new Error("That is not a bot token: @BotFather shows it as digits, a colon and a key.");
+  const key = readPrivateKey(privateKeyPath);
+  let token;
+  try {
+    token = decryptBrokerEnvelope(envelope, key);
+  } catch {
+    throw permanent("The saved token could not be read on the server. Paste it again.");
+  }
+  if (!looksLikeBotToken(token)) throw permanent("That is not a bot token: @BotFather shows it as digits, a colon and a key.");
   return token;
 }
+
+// Telegram's answer that the bot itself is gone for us: a revoked token (401),
+// a bot the operator blocked or a chat that no longer exists (403).
+const botRefused = (error) => error?.status === 401 || error?.status === 403 || error?.status === 404;
 
 async function serveConnection(connection) {
   let token = "";
@@ -59,11 +78,14 @@ async function serveConnection(connection) {
     if (connection.status === "awaiting_chat") {
       const key = connection.bot_username;
       const updates = await telegram(token, "getUpdates", { offset: offsets.get(key) ?? 0, timeout: 0, allowed_updates: ["message"] });
-      offsets.set(key, nextOffset(updates, offsets.get(key) ?? 0));
+      const next = nextOffset(updates, offsets.get(key) ?? 0);
       const chat = linkedChat(updates, connection.link_code);
-      if (!chat) return undefined;
+      // The offset moves on only once the link is recorded: a moved offset
+      // tells Telegram to drop the /start, and a failed write would lose it.
+      if (!chat) { offsets.set(key, next); return undefined; }
       await queryJson(`SELECT record_telegram_chat(:'owner'::uuid,:'code',:'chat'::bigint,:'label')::text;`,
         { owner: connection.operator_id, code: connection.link_code, chat: String(chat.chatId), label: chat.label });
+      offsets.set(key, next);
       await telegram(token, "sendMessage", { chat_id: chat.chatId, text: notificationText({ kind: "test",
         title: "Connected to Agentic Control", body: "You will get a message here when a task needs you." }, domain) });
       return { kind: "linked" };
@@ -71,10 +93,11 @@ async function serveConnection(connection) {
     return undefined;
   } catch (error) {
     const message = redactError(error, "Telegram could not be reached.", [token]);
-    // A refused token is the operator's to fix; a network fault is retried.
-    if (connection.status === "verifying" && (error.status === 401 || error.status === 404 || /not a bot token|decrypt|unable/i.test(String(error.message)))) {
+    // A refused token or an unreadable envelope is the operator's to fix; a
+    // network fault is retried.
+    if (error.permanent || botRefused(error)) {
       await queryJson(`SELECT fail_telegram_bot(:'owner'::uuid,:'message')::text;`,
-        { owner: connection.operator_id, message: error.status ? "Telegram refused this bot token. Copy it again from @BotFather." : message });
+        { owner: connection.operator_id, message: error.permanent ? message : "Telegram refused this bot token. Copy it again from @BotFather." });
       return { kind: "refused" };
     }
     return { kind: "error", error: message };
@@ -95,6 +118,13 @@ async function sendNotification(item) {
     const message = redactError(error, "The message was not sent.", [token]);
     await queryJson(`SELECT fail_notification(:'id'::bigint,:'worker',:'message');`,
       { id: String(item.id), worker: workerId, message }).catch(() => undefined);
+    // The bot is gone for us: say so on the connection, so the panel shows it
+    // rather than "Connected" while every message fails.
+    if (error.permanent || botRefused(error)) {
+      await queryJson(`SELECT fail_telegram_bot(:'owner'::uuid,:'message')::text;`, { owner: item.operator_id,
+        message: error.permanent ? message : "Telegram refused the bot: its token was revoked, or the bot was blocked. Set it up again." })
+        .catch(() => undefined);
+    }
     return { kind: "send_failed", id: item.id, error: message };
   } finally {
     token = "";
