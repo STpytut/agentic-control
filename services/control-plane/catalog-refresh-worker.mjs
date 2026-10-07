@@ -25,7 +25,7 @@
 
 import readline from "node:readline";
 import { queryJson, closePool } from "./db.mjs";
-import { claudeAliasEntries, claudeListedEntries } from "./catalog-claude.mjs";
+import { claudeDiscovery } from "./catalog-claude.mjs";
 import { RuntimeSupervisorClient, cancelThrough, retryWhileRuntimeBusy } from "../runtime-supervisor/client.mjs";
 import { OPENCODE_ACCOUNT_LABELS, openCodeProviderFor } from "../runtime-supervisor/opencode-account-channel.mjs";
 import { catalogReasoningLevels } from "../runtime-supervisor/drivers/reasoning.mjs";
@@ -289,16 +289,15 @@ async function discoverOpenCodeModels({ supervisor, connection, providerId, leas
 // --- Claude Code (sprint C K2) ------------------------------------------------
 
 async function discoverClaudeModels({ supervisor, connection }) {
-  const aliases = claudeAliasEntries(connection);
-  let listed = [];
+  let answer;
   try {
-    const answer = await supervisor.listClaudeModels();
-    if (Array.isArray(answer?.models)) listed = claudeListedEntries(answer.models, connection);
-    else process.stderr.write(`${JSON.stringify({ type: "catalog-refresh.claude-models", error: String(answer?.error ?? "no answer") })}\n`);
+    answer = await supervisor.listClaudeModels();
   } catch (error) {
-    process.stderr.write(`${JSON.stringify({ type: "catalog-refresh.claude-models", error: safeError(error) })}\n`);
+    answer = { error: safeError(error) };
   }
-  return [...aliases, ...listed];
+  const discovery = claudeDiscovery(answer, connection);
+  if (discovery.unreadSources.length) process.stderr.write(`${JSON.stringify({ type: "catalog-refresh.claude-models", error: String(answer?.error ?? "no answer"), kept: discovery.unreadSources })}\n`);
+  return discovery;
 }
 
 // --- Refresh processing -----------------------------------------------------
@@ -321,11 +320,11 @@ async function discoverModels(item, leaseExpiresAt = null) {
   try {
     const connection = { ...item, ...connectionMetadata(item) };
     if (item.provider === "codex") {
-      return await discoverCodexModels({ supervisor, connection, leaseExpiresAt });
+      return { entries: await discoverCodexModels({ supervisor, connection, leaseExpiresAt }), unreadSources: [] };
     }
     if (item.provider === "opencode") {
       const providerId = openCodeProviderFor(item.access_gateway);
-      return await discoverOpenCodeModels({ supervisor, connection, providerId, leaseExpiresAt });
+      return { entries: await discoverOpenCodeModels({ supervisor, connection, providerId, leaseExpiresAt }), unreadSources: [] };
     }
     if (item.provider === "claude") return await discoverClaudeModels({ supervisor, connection });
     throw new Error(`catalog discovery is unsupported for provider ${item.provider}`);
@@ -336,8 +335,9 @@ async function discoverModels(item, leaseExpiresAt = null) {
 
 async function processRefresh(item, leaseExpiresAt = null) {
   let entries;
+  let unreadSources = [];
   try {
-    entries = await discoverModels(item, leaseExpiresAt);
+    ({ entries, unreadSources } = await discoverModels(item, leaseExpiresAt));
     if (entries.length === 0) {
       throw new Error("provider response contained no models");
     }
@@ -392,12 +392,13 @@ async function processRefresh(item, leaseExpiresAt = null) {
     );
     const seenIds = Array.isArray(upsert?.seen_entry_ids) ? upsert.seen_entry_ids : [];
     const completed = await queryJson(
-      `SELECT complete_catalog_refresh(:'refresh_id'::uuid,:'worker_id',:'seen_ids'::uuid[],:'missing_status')::text;`,
+      `SELECT complete_catalog_refresh(:'refresh_id'::uuid,:'worker_id',:'seen_ids'::uuid[],:'missing_status',:'unread_sources'::text[])::text;`,
       {
         refresh_id: item.refresh_id,
         worker_id: workerId,
         seen_ids: seenIds.length ? `{${seenIds.join(",")}}` : "{}",
         missing_status: "unavailable",
+        unread_sources: `{${unreadSources.join(",")}}`,
       },
     );
     // The journal line says what the list changed: new models, and versions

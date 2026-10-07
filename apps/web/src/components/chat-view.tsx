@@ -48,12 +48,14 @@ function relativeTime(value: string) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-// The action card's icon tile: the kind of decision asked, in the status palette.
-function actionIconTone(type: string) {
-  return type === "review" ? "bg-info-soft text-info"
-    : type === "incident" || type === "publish_failed" ? "bg-danger-soft text-danger"
-    : type === "publish" ? "bg-success-soft text-success"
-    : "bg-warning-soft text-warning";
+// The action card's edge: the kind of decision asked, in the status palette.
+// It replaced an icon tile and an ACTION REQUIRED badge, three marks that said
+// the same thing above a title that already did.
+function actionEdgeTone(type: string) {
+  return type === "review" ? "border-l-info"
+    : type === "incident" || type === "publish_failed" ? "border-l-danger"
+    : type === "publish" ? "border-l-success"
+    : "border-l-warning";
 }
 
 // The chat's first task: its title is the chat's (ADR-0014).
@@ -162,11 +164,13 @@ export function ChatView({ operator, workspace, activeTask, writeEnabled, view, 
                 <StepCard states={workSteps(activeTask.status, messages.map((message) => message.eventType), workspace.publishState?.stage ?? null)}
                   executor={executorLine(workspace.agentRoster, activeTask.executorAssignmentIds, modelLabel)}
                   files={stepFiles(activeTask.status, workspace)}
+                  changes={["implementing", "revising"].includes(activeTask.status) ? null : workspace.taskChanges}
                   action={<ShowPanelTab tab="changes">View changes</ShowPanelTab>}/>
                 <PublishStatusCard state={workspace.publishState}/>
-                {workspace.attention.map((action) => <article className="mb-6 grid grid-cols-[34px_minmax(0,1fr)] gap-3 rounded-lg border border-line-strong p-4 phone:grid-cols-[28px_minmax(0,1fr)] phone:p-3" key={`${action.type}:${action.id}`} role="region" aria-labelledby={`action-${action.type}-${action.id}`}>
-                  <span className={cx("grid h-8 w-8 place-items-center rounded-sm text-[0.8125rem] font-medium phone:h-7 phone:w-7", actionIconTone(action.type))} aria-hidden="true">{action.type === "approval" ? "!" : action.type === "review" ? "✓" : action.type === "incident" || action.type === "publish_failed" ? "↻" : action.type === "publish" ? "↑" : "?"}</span>
-                  <div className="min-w-0"><header className="flex items-start justify-between gap-3 phone:flex-col phone:gap-1.5"><span className="flex flex-col items-start gap-1.5"><Badge tone="attention">ACTION REQUIRED</Badge><strong className="type-card-title" id={`action-${action.type}-${action.id}`}>{action.title}</strong></span><time className="type-meta shrink-0 text-muted">{relativeTime(action.time)}</time></header><p className="type-app-body mt-2 text-ink/80">{action.description}</p><WorkflowActions action={action} acceptanceCriteria={activeTask.acceptanceCriteria}/></div>
+                {workspace.attention.map((action) => <article className={cx("mb-6 rounded-lg border border-l-4 border-line-strong p-4 phone:p-3", actionEdgeTone(action.type))} key={`${action.type}:${action.id}`} role="region" aria-labelledby={`action-${action.type}-${action.id}`}>
+                  <header className="flex items-baseline justify-between gap-3"><strong className="type-card-title" id={`action-${action.type}-${action.id}`}>{action.title}</strong><time className="type-meta shrink-0 text-muted">{relativeTime(action.time)}</time></header>
+                  <p className="type-app-body mt-1.5 text-ink/80">{action.description}</p>
+                  <WorkflowActions action={action} acceptanceCriteria={activeTask.acceptanceCriteria}/>
                 </article>)}
                 <LiveTaskActivity projectId={project.id} taskId={activeTask.id} initialActivity={workspace.taskActivity} awaitingResponse={messages.at(-1)?.role === "user"}/>
               </ChatScrollArea>

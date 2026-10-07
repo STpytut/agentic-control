@@ -610,12 +610,21 @@ export async function performControlPlaneAction(body: Record<string, unknown>, o
   }
   if (kind === "review_approve") {
     const taskId = uuid(body.taskId, "taskId");
-    return executeJson(
+    const approved = await executeJson(
       `SELECT approve_task_review(:'project_id'::uuid,:'task_id'::uuid,:'actor',:'summary',:'key',:'version'::bigint,:'correlation')::text;`,
       { project_id: ownedProjectId, task_id: taskId, actor,
         summary: text(body.summary, "summary", 3, 2000), key: `web-approve:${taskId}:${version(body.taskVersion)}`,
         version: String(version(body.taskVersion)), correlation },
     );
+    if (body.publish !== true) return approved;
+    // "Approve & open PR" (0138): the same click asks for the publish. A
+    // refusal is answered, not raised, so the approval stands and the Publish
+    // card asks again.
+    const publish = await executeJson(
+      `SELECT request_publish_on_approval(:'project_id'::uuid,:'task_id'::uuid,:'owner_id'::uuid,:'actor',:'correlation')::text;`,
+      { project_id: ownedProjectId, task_id: taskId, owner_id: operator.userId, actor, correlation },
+    );
+    return { ...(approved as Record<string, unknown>), publish };
   }
   if (kind === "revision") {
     const taskId = uuid(body.taskId, "taskId");

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { claudeListedEntries } from "../catalog-claude.mjs";
+import { claudeDiscovery, claudeListedEntries } from "../catalog-claude.mjs";
 
 test("the subscription's newest model of each family is offered beside the aliases", () => {
   // The list Anthropic returned on the host, 2026-10-01 (abridged).
@@ -19,4 +19,19 @@ test("the subscription's newest model of each family is offered beside the alias
   assert.equal(opus.runtime_type, "claude");
   assert.equal(opus.billing_boundary, "subscription");
   assert.deepEqual(claudeListedEntries(null, {}), []);
+});
+
+// 2026-10-07: the host's Claude token had expired, the list answered
+// {"error":"expired"}, and the refresh marked every listed model unavailable —
+// teams pinned to claude-sonnet-5-5 stopped. An unread list keeps them (0137).
+test("a list that could not be read leaves the listed models as they were", () => {
+  const unread = claudeDiscovery({ error: "expired" }, { plan_badge: "max" });
+  assert.ok(unread.entries.length > 0, "the aliases are still offered");
+  assert.ok(unread.entries.every((entry) => entry.discovery_source !== "anthropic_models"));
+  assert.deepEqual(unread.unreadSources, ["anthropic_models"]);
+  assert.deepEqual(claudeDiscovery(undefined, {}).unreadSources, ["anthropic_models"]);
+
+  const read = claudeDiscovery({ models: [{ id: "claude-sonnet-5-5", display_name: "Claude Sonnet 5.5", created_at: "2026-09-28T00:00:00Z" }] }, {});
+  assert.deepEqual(read.unreadSources, []);
+  assert.ok(read.entries.some((entry) => entry.model_id === "claude-sonnet-5-5"));
 });

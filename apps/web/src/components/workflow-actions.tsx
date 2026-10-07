@@ -40,7 +40,10 @@ export function WorkflowActions({ action, acceptanceCriteria }: Props) {
         if (response.status === 409) router.refresh();
         throw new Error(body.error ?? "Action failed");
       }
-      setNotice({ ok: true, text: "Action recorded. The workflow state has been refreshed." });
+      const publish = body.result?.publish as { refused?: string } | undefined;
+      setNotice(publish?.refused
+        ? { ok: false, text: `Approved. The pull request was not requested: ${publish.refused} Publish it from the card when it appears.` }
+        : { ok: true, text: payload.publish ? "Approved. The pull request opens once the host has prepared the commit." : "Action recorded. The workflow state has been refreshed." });
       setInput("");
       setMode("idle");
       router.refresh();
@@ -72,7 +75,13 @@ export function WorkflowActions({ action, acceptanceCriteria }: Props) {
       {notice && <Notice role="status" tone={notice.ok ? "success" : "danger"} className="mt-2.5">{notice.text}</Notice>}
       <div className="mt-4 flex flex-wrap gap-2 [&>*]:flex-1 phone:flex-col phone:[&>*]:w-full phone:[&>*]:flex-none">
         {action.type === "review" && mode === "idle" && <>
-          <button type="button" className={primary} disabled={busy} onClick={() => submit({ kind: "review_approve", projectId: action.projectId, taskId: action.taskId, taskVersion: action.taskVersion, summary: "Reviewed and accepted from the control-plane UI" })}>{busy ? "Sending…" : "Approve changes"}</button>
+          {/* One click for the usual path: approve, and open the pull request
+              once the host has prepared the commit (0138). Approving alone
+              stays, for a look at the branch before any pull request. */}
+          {action.canPublish
+            ? <button type="button" className={primary} disabled={busy} onClick={() => submit({ kind: "review_approve", projectId: action.projectId, taskId: action.taskId, taskVersion: action.taskVersion, summary: "Reviewed and accepted from the control-plane UI", publish: true })}>{busy ? "Sending…" : "Approve & open PR"}</button>
+            : null}
+          <button type="button" className={action.canPublish ? secondary : primary} disabled={busy} onClick={() => submit({ kind: "review_approve", projectId: action.projectId, taskId: action.taskId, taskVersion: action.taskVersion, summary: "Reviewed and accepted from the control-plane UI" })}>{busy ? "Sending…" : action.canPublish ? "Approve only" : "Approve changes"}</button>
           <button type="button" className={secondary} disabled={busy} onClick={() => setMode("revision")}>Request changes</button>
         </>}
         {action.type === "review" && mode === "revision" && <>

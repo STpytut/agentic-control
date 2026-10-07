@@ -531,3 +531,45 @@ test("only the operator makes an intent: the worker role cannot, and a stranger'
   await assert.rejects(queryJson(`SELECT request_publish(:'id'::uuid,gen_random_uuid(),'operator','c')::text;`, { id: f.preparation }),
     (error) => failureReason(error) === "publish_not_prepared");
 });
+
+// "Approve & open PR" (0138): the approving operator's request rides on the
+// preparation, and is made in their name when the host finishes it.
+const onApproval = (f) => queryJson(
+  `SELECT request_publish_on_approval(:'project'::uuid,:'task'::uuid,:'owner'::uuid,'operator',:'corr')::text;`,
+  { project: f.project, task: f.task, owner: f.owner, corr: `corr-${randomUUID()}` });
+const intentFor = (f) => psql(`SELECT count(*) FROM publish_intents WHERE task_id='${f.task}';`);
+
+test("approve & open PR: a preparation already done is published at once", { skip }, async () => {
+  const f = fixture("b".repeat(40));
+  const answer = await onApproval(f);
+  assert.equal(answer.when, "now");
+  assert.ok(answer.publish_intent_id, JSON.stringify(answer));
+  assert.equal(intentFor(f), "1");
+});
+
+test("approve & open PR: a preparation in progress is published when the host finishes it", { skip }, async () => {
+  const f = fixture("c".repeat(40));
+  // A second, newer preparation still in progress: the one the approval opened.
+  const pending = psql(`SET session_replication_role = replica;
+    INSERT INTO publish_preparations(project_id,task_id,verdict_id,evidence_id,evidence_digest,requested_by,idempotency_key,correlation_id)
+      VALUES('${f.project}','${f.task}',gen_random_uuid(),gen_random_uuid(),'sha256:test','test','prep:later-${randomUUID()}','corr') RETURNING id;`)
+    .split("\n").pop();
+  const answer = await onApproval(f);
+  assert.equal(answer.when, "prepared", JSON.stringify(answer));
+  assert.equal(answer.publish_preparation_id, pending);
+  assert.equal(intentFor(f), "0", "published before the host prepared it");
+  psql(`UPDATE publish_preparations SET status='prepared', observed='{}'::jsonb, head_commit_sha='${"c".repeat(40)}',
+    finished_at=clock_timestamp() WHERE id='${pending}';`);
+  assert.equal(psql(`SELECT count(*) FROM publish_intents WHERE preparation_id='${pending}' AND requested_by='operator';`), "1");
+});
+
+test("approve & open PR: a refusal is answered, not raised, and the approval's transaction goes on", { skip }, async () => {
+  const f = fixture("d".repeat(40), "empty");
+  const answer = await onApproval(f);
+  assert.match(String(answer.refused), /GitHub App/);
+  assert.equal(intentFor(f), "0");
+  const grants = await queryJson(`SELECT jsonb_build_object(
+      'web',has_function_privilege('infra_web','request_publish_on_approval(uuid,uuid,uuid,text,text)','EXECUTE'),
+      'worker',has_function_privilege('infra_worker','request_publish_on_approval(uuid,uuid,uuid,text,text)','EXECUTE'))::text;`);
+  assert.deepEqual(grants, { web: true, worker: false });
+});
