@@ -348,6 +348,10 @@
     "0141_offsite_backups.sql": {
       "previousReleaseCompatible": true,
       "note": "Adds offsite_backup_target and its functions; nothing the previous release reads or writes changes."
+    },
+    "0142_telegram_decisions.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds telegram_decisions, a nullable outbox column, telegram_decide, and replaces notify_task_awaiting_approval and claim_notifications under their signatures with supersets of what they returned; the previous release reads none of it differently."
     }
   }
 }

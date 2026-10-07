@@ -48,6 +48,12 @@ export function OffsiteBackupCard({ initial }: { initial: OffsiteBackup }) {
     setError("");
     try {
       if (!/^https:\/\/[A-Za-z0-9.-]+$/.test(endpoint.trim().replace(/\/$/, ""))) throw new Error("The endpoint is the S3 API address R2 shows: https://<account id>.r2.cloudflarestorage.com");
+      // Field by field: the database's one sentence did not say which was wrong,
+      // and R2's token screen shows a cfat_… "Token value" beside the S3 keys.
+      if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket.trim())) throw new Error("The bucket name is lowercase letters, digits, dots and hyphens, as R2 shows it.");
+      if (keyId.trim().startsWith("cfat_")) throw new Error("That is the token value for Cloudflare's API. Paste the Access Key ID instead: 32 letters and digits.");
+      if (!/^[A-Za-z0-9]{16,128}$/.test(keyId.trim())) throw new Error("The Access Key ID is letters and digits only — 32 of them for R2.");
+      if (secret.trim().startsWith("cfat_")) throw new Error("That is the token value for Cloudflare's API. Paste the Secret Access Key instead: 64 letters and digits.");
       if (secret.trim().length < 16) throw new Error("Paste the secret access key R2 showed when you made the token.");
       const envelope = await encryptOpenCodeApiKey(secret.trim(), await brokerKey());
       await action({ kind: "offsite_set", endpoint: endpoint.trim().replace(/\/$/, ""), bucket: bucket.trim(), accessKeyId: keyId.trim(),

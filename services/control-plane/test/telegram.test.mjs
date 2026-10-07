@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createCipheriv, generateKeyPairSync, publicEncrypt, constants, randomBytes } from "node:crypto";
-import { decryptBrokerEnvelope, linkedChat, looksLikeBotToken, nextOffset, notificationText, startsWithoutCode } from "../telegram.mjs";
+import { decisionKeyboard, decisionPress, decryptBrokerEnvelope, linkedChat, looksLikeBotToken, nextOffset, notificationText, startsWithoutCode } from "../telegram.mjs";
 
 const TOKEN = "123456789:AAH-fake_token_for_tests_only_0123456789";
 
@@ -62,4 +62,21 @@ test("a /start without the code is answered once per chat; the right one is not"
     { update_id: 5, message: { text: "hello", chat: { id: 10 } } },
   ];
   assert.deepEqual(startsWithoutCode(updates, "abc123abc123abc1"), [7, 8]);
+});
+
+test("an approval message carries its decision buttons; a press counts only from the linked chat", () => {
+  const item = { kind: "approval", decision_token: "Abc123Abc123Abc123Ab", can_publish: true, link_path: "/projects/p?task=t" };
+  assert.deepEqual(decisionKeyboard(item, "panel.example"), { inline_keyboard: [
+    [{ text: "✅ Approve & open PR", callback_data: "ap:Abc123Abc123Abc123Ab" }, { text: "Approve only", callback_data: "ao:Abc123Abc123Abc123Ab" }],
+    [{ text: "Open chat", url: "https://panel.example/projects/p?task=t" }],
+  ] });
+  assert.deepEqual(decisionKeyboard({ ...item, can_publish: false }, "").inline_keyboard, [[{ text: "✅ Approve", callback_data: "ao:Abc123Abc123Abc123Ab" }]]);
+  assert.equal(decisionKeyboard({ kind: "question", link_path: "/x" }, "panel.example"), undefined);
+
+  const press = (chat, data) => ({ update_id: 1, callback_query: { id: "q1", data, message: { message_id: 5, text: "🟡 Needs your approval", chat: { id: chat } } } });
+  assert.deepEqual(decisionPress(press(42, "ap:Abc123Abc123Abc123Ab"), 42),
+    { queryId: "q1", choice: "approve_publish", token: "Abc123Abc123Abc123Ab", chatId: 42, messageId: 5, text: "🟡 Needs your approval" });
+  assert.deepEqual(decisionPress(press(99, "ap:Abc123Abc123Abc123Ab"), 42), { queryId: "q1", ignored: true });
+  assert.deepEqual(decisionPress(press(42, "rm:everything"), 42), { queryId: "q1", ignored: true });
+  assert.equal(decisionPress({ update_id: 2, message: { text: "hi" } }, 42), null);
 });

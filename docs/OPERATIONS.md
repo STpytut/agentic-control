@@ -662,6 +662,12 @@ opens, or a publish fails or is refused. Each message links to the chat.
   five times with a growing pause; the token is redacted from every error.
 - Messages are queued only for an owner with Telegram set up; Disconnect drops
   the envelope and anything still unsent.
+- The approval message carries buttons (0142): **Approve & open PR** (for a
+  GitHub App repository), **Approve only**, and **Open chat**. Each press is a
+  one-time token bound to the task's version, accepted only from the linked
+  chat, and decided by `approve_task_review` exactly as the panel decides it.
+  A press after the task moved on is answered, not applied. Request changes
+  stays in the panel.
 
 Diagnostics:
 

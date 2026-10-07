@@ -78,3 +78,33 @@ export function nextOffset(updates, current = 0) {
   return (Array.isArray(updates) ? updates : []).reduce((offset, update) =>
     Number.isSafeInteger(update?.update_id) ? Math.max(offset, update.update_id + 1) : offset, current);
 }
+
+// The approval message's buttons (0142): approve and open the pull request
+// (for a repository the platform can publish), approve only, and the chat.
+// callback_data stays far under Telegram's 64 bytes: "ap:" or "ao:" and the
+// 20-character token.
+export function decisionKeyboard(item, domain) {
+  const rows = [];
+  if (item.decision_token) {
+    rows.push([
+      ...(item.can_publish ? [{ text: "✅ Approve & open PR", callback_data: `ap:${item.decision_token}` }] : []),
+      { text: item.can_publish ? "Approve only" : "✅ Approve", callback_data: `ao:${item.decision_token}` },
+    ]);
+  }
+  if (rows.length && domain && item.link_path) rows.push([{ text: "Open chat", url: `https://${domain}${item.link_path}` }]);
+  return rows.length ? { inline_keyboard: rows } : undefined;
+}
+
+const CHOICES = { ap: "approve_publish", ao: "approve" };
+
+// A button press from getUpdates, if it is one of ours and came from the
+// linked chat; anything else is ignored.
+export function decisionPress(update, chatId) {
+  const query = update?.callback_query;
+  if (!query?.id) return null;
+  const match = /^(ap|ao):([A-Za-z0-9]{20})$/.exec(String(query.data ?? ""));
+  const fromChat = query.message?.chat?.id;
+  if (!match || fromChat !== Number(chatId)) return { queryId: query.id, ignored: true };
+  return { queryId: query.id, choice: CHOICES[match[1]], token: match[2], chatId: fromChat,
+    messageId: query.message?.message_id, text: String(query.message?.text ?? "") };
+}
