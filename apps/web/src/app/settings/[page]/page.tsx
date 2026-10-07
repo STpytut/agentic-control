@@ -6,6 +6,8 @@ import { SettingsMenu, SettingsPageHeader } from "@/components/settings-menu";
 import { BackToChats } from "@/components/last-chat";
 import { GitHubConnectionCard } from "@/components/github-connection-card";
 import { ClaudeConnectionCard } from "@/components/claude-connection-card";
+import { TelegramCard } from "@/components/telegram-card";
+import { getTelegramConnection } from "@/lib/telegram-connection";
 import { CodexConnectionCard } from "@/components/codex-connection-card";
 import { OpenCodeConnectionCard } from "@/components/opencode-connection-card";
 import { OperatorAccountCard, type OperatorSessionRow } from "@/components/operator-account-card";
@@ -42,6 +44,7 @@ const PAGES = [
   { id: "models", label: "Models" },
   { id: "runtimes", label: "Runtimes" },
   { id: "usage", label: "Limits & usage" },
+  { id: "notifications", label: "Notifications" },
   { id: "projects", label: "Projects" },
 ] as const;
 type PageId = typeof PAGES[number]["id"];
@@ -62,6 +65,7 @@ export default async function SettingsPage({ params, searchParams }: { params: P
     getOperatorClaudeState(operator.userId),
   ]);
   const runtimeUpdateRequests = current === "runtimes" ? await getRuntimeUpdateRequests() : [];
+  const telegram = current === "notifications" ? await getTelegramConnection(operator.userId) : null;
   const [githubApp, githubManifest] = current === "connections"
     ? await Promise.all([getGitHubAppConfig(), getGitHubAppManifestStatus(operator.userId)])
     : [null, null];
@@ -127,6 +131,11 @@ export default async function SettingsPage({ params, searchParams }: { params: P
       {current === "runtimes" && runtimeReadiness && <>
         <SettingsPageHeader title="Runtimes" description="The host's agent runtimes: what this server can run, for every project."/>
         <RuntimeReadinessCard report={runtimeReadiness} versions={runtimeVersions ?? []} qualifications={runtimeQualifications ?? []} activations={runtimeActivations ?? []} requests={runtimeUpdateRequests}/>
+      </>}
+
+      {current === "notifications" && telegram && <>
+        <SettingsPageHeader title="Notifications" description="Where the panel tells you that it waits for you."/>
+        <div className="max-w-[640px]"><TelegramCard initial={telegram}/></div>
       </>}
 
       {current === "usage" && <>

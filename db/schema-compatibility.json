@@ -340,6 +340,10 @@
     "0139_web_reads_changed_files.sql": {
       "previousReleaseCompatible": true,
       "note": "Grants infra_web SELECT on review_evidence.changed_files, which the step card reads; no schema change."
+    },
+    "0140_telegram_notifications.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds telegram_connections, notification_outbox, their functions, and AFTER triggers on tasks and domain_events that queue a message only for an owner with Telegram set up; nothing the previous release reads or writes changes."
     }
   }
 }

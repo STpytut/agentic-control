@@ -38,6 +38,14 @@ function relativeTime(value: string) {
 
 const SETTLED = ["approved", "deployed", "completed", "cancelled", "failed"];
 
+// A project's first chat: tasks that work on any repository and show the whole
+// loop — plan, code on a branch, review, approve — in a few minutes.
+const FIRST_TASKS = [
+  "Read the repository and add a \"Run it locally\" section to the README.",
+  "Find the most important function without a test, add tests for it, and fix what they find.",
+  "Find one small bug or rough edge, fix it, and add a test that would have caught it.",
+];
+
 function SummaryCard({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
   return <section aria-label={label} className={cx("flex min-w-0 flex-col gap-1 rounded-lg border border-line px-4 py-3", className)}>
     <p className="type-eyebrow m-0 text-muted">{label}</p>
@@ -112,6 +120,7 @@ export function ProjectStart({ operator, workspace, writeEnabled, runtimeReadine
         <div className="grid gap-2">
           {runtimeReadiness && !projectReadiness && <RuntimeDispatchWarning report={runtimeReadiness}/>}
           <ChatComposer projectId={project.id} variant="start" className="w-full px-4 pt-3.5 pb-3"
+            examples={chats.length ? [] : FIRST_TASKS}
             agentRoster={agentRoster} readiness={projectReadiness} memberLabels={labels}
             enabled={writeEnabled && project.provisioningStatus === "ready"}
             disabledReason={!writeEnabled ? "Operator authentication is required to send messages" : project.provisioningStatus === "failed" ? "Workspace setup failed. Configure repository access and retry setup." : "Workspace setup is still in progress."}/>

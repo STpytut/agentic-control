@@ -201,7 +201,7 @@ function taskTitle(message: string, value: unknown) {
 
 async function ownedProjectForAction(kind: string, body: Record<string, unknown>, ownerId: string) {
   if (kind === "create_project" || kind.startsWith("github_") || kind.startsWith("codex_")
-      || kind.startsWith("opencode_") || kind.startsWith("claude_") || kind === "catalog_refresh"
+      || kind.startsWith("opencode_") || kind.startsWith("claude_") || kind.startsWith("telegram_") || kind === "catalog_refresh"
       || kind === "model_pin" || kind === "model_unpin"
       || kind === "model_check" || kind === "runtime_update") return "";
   let sql: string;
@@ -742,6 +742,28 @@ export async function performControlPlaneAction(body: Record<string, unknown>, o
 
   // Sprint C K2: the operator's Claude subscription, signed in on the host,
   // connected for the team — or disconnected, which dispatch reads as revoked.
+  // 0140: Telegram notifications. The token arrives as the broker envelope
+  // the browser made (as OpenCode keys do) and is never read back here.
+  if (kind === "telegram_set") {
+    const b64 = (value: unknown, name: string) => {
+      if (typeof value !== "string" || value.length < 16 || value.length > 8192 || !/^[A-Za-z0-9+/=]+$/.test(value)) {
+        throw new Error(`${name} is invalid`);
+      }
+      return value;
+    };
+    return executeJson(`SELECT set_telegram_bot(:'owner_id'::uuid,:'envelope'::jsonb)::text;`, {
+      owner_id: operator.userId,
+      envelope: JSON.stringify({ ciphertext: b64(body.ciphertext, "ciphertext"), iv: b64(body.iv, "iv"),
+        tag: b64(body.tag, "tag"), key_wrap: b64(body.keyWrap, "keyWrap") }),
+    });
+  }
+  if (kind === "telegram_disconnect") {
+    return executeJson(`SELECT disconnect_telegram(:'owner_id'::uuid)::text;`, { owner_id: operator.userId });
+  }
+  if (kind === "telegram_test") {
+    return executeJson(`SELECT send_telegram_test(:'owner_id'::uuid)::text;`, { owner_id: operator.userId });
+  }
+
   if (kind === "claude_connect") {
     return executeJson(`SELECT connect_claude_connection(:'owner_id'::uuid,:'actor',:'correlation')::text;`,
       { owner_id: operator.userId, actor, correlation });

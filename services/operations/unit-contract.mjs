@@ -36,6 +36,7 @@ export const LONG_RUNNING_SERVICES = [
   "infra-cod-github-app-worker",
   "infra-cod-catalog-refresh-worker",
   "infra-cod-catalog-gate-worker",
+  "infra-cod-telegram-notifier",
 ];
 
 // Type=oneshot services. A completed oneshot is `inactive`, so `is-active` is
