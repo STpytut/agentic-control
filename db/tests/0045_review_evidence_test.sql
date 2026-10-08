@@ -290,8 +290,20 @@ BEGIN
   -- Asked again, with the tree as it was approved: prepared, naming the commit to push.
   PERFORM request_publish_preparation(v_project,v_task,'operator','before-push-1',v_task::text);
   v_claim:=claim_publish_preparation('evidence-supervisor',interval '2 minutes');
-  v_prepared:=prepare_publish((v_claim->>'id')::uuid,'evidence-supervisor',
-    jsonb_build_object('base_commit_sha',v_base,'head_commit_sha',v_head2,'worktree_digest',v_tree2,'patch_digest',v_patch2));
+  -- 0150: the claim names the approved commit; a workspace that moved on past
+  -- it is prepared from it only when it still holds it and the base is the same.
+  IF v_claim->>'head_commit_sha' IS DISTINCT FROM v_head2 THEN RAISE EXCEPTION 'the claim does not name the approved commit: %', v_claim; END IF;
+  v_observed:=jsonb_build_object('base_commit_sha',v_base,'head_commit_sha',repeat('7',40),
+    'worktree_digest','sha256:'||repeat('7',64),'patch_digest','sha256:'||repeat('7',64),'approved_commit_sha',v_head2);
+  IF pg_temp.reason_of(format($q$ SELECT prepare_publish(%L,%L,%L::jsonb) $q$, v_claim->>'id','evidence-supervisor',
+      v_observed || '{"approved_commit_present":false}')) IS DISTINCT FROM 'review_evidence_digest_moved' THEN
+    RAISE EXCEPTION 'a workspace without the approved commit was prepared';
+  END IF;
+  IF pg_temp.reason_of(format($q$ SELECT prepare_publish(%L,%L,%L::jsonb) $q$, v_claim->>'id','evidence-supervisor',
+      v_observed || jsonb_build_object('approved_commit_present',true,'base_commit_sha',repeat('6',40)))) IS DISTINCT FROM 'review_evidence_digest_moved' THEN
+    RAISE EXCEPTION 'a moved base was prepared';
+  END IF;
+  v_prepared:=prepare_publish((v_claim->>'id')::uuid,'evidence-supervisor', v_observed || '{"approved_commit_present":true}');
   IF v_prepared->>'status'<>'prepared' OR v_prepared->>'head_commit_sha'<>v_head2
      OR v_prepared->>'evidence_digest'<>v_evidence2 THEN
     RAISE EXCEPTION 'the approved tree was not prepared: %', v_prepared;

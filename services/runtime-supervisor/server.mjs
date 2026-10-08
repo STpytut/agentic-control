@@ -886,7 +886,17 @@ async function processPublishPreparation() {
       if (!(await assertWorkspaceOnDisk(located.workspace))) throw new Error("the workspace is not on disk");
       observed = await inWorkspaceTurn(located.workspace, async () => {
         const owner = inspectOwner((await stat(located.workspace)).uid, runtimeUid);
-        return observationOf(await reviewEvidenceAs(owner, located.workspace, claim.base_commit_sha));
+        const seen = observationOf(await reviewEvidenceAs(owner, located.workspace, claim.base_commit_sha));
+        // 0150: the workspace moved on past the approved commit (the next
+        // task committed on top of it). Whether it still holds that commit is
+        // git's to say, as the workspace's owner; the database decides.
+        const approved = String(claim.head_commit_sha ?? "");
+        if (/^[0-9a-f]{40}([0-9a-f]{24})?$/.test(approved) && seen.head_commit_sha !== approved) {
+          const present = await gitAs(owner, located.workspace)(
+            ["-c", "core.fsmonitor=false", "merge-base", "--is-ancestor", approved, "HEAD"]);
+          return { ...seen, approved_commit_sha: approved, approved_commit_present: present.code === 0 };
+        }
+        return seen;
       });
     } catch (error) {
       const refused = await recordPublishRefusal(claim, "publish_observation_failed", error.message);

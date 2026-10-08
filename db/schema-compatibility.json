@@ -380,6 +380,10 @@
     "0149_delegate_after_consult.sql": {
       "previousReleaseCompatible": true,
       "note": "Recreates invoke_delegate_task with the same signature and grants; it also accepts a resume_orchestrator turn brought by a consultation's answer."
+    },
+    "0150_publish_approved_commit.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Recreates claim_publish_preparation (one more key in its result) and prepare_publish (accepts a moved workspace that still holds the approved commit) with the same signatures and grants; the previous release's supervisor reports no approved_commit_present and is refused as before."
     }
   }
 }
