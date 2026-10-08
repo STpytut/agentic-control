@@ -77,7 +77,7 @@ if [ ${#suites[@]} -eq 0 ]; then
   # The three database phases are last because they are the ones that need a
   # server, not because they matter least.
   suites=(lint:services test:unit test:runtime test:update test:installer test:release \
-          db:test test:integration:db test:lease-contract test:e2e:orchestrator)
+          db:test test:integration:db test:lease-contract test:e2e:orchestrator test:web-render)
 fi
 
 # Does anything in this run need PostgreSQL? Asked rather than assumed, so a run
@@ -86,7 +86,7 @@ fi
 needs_database=0
 for suite in "${suites[@]}"; do
   case "${suite}" in
-    db:test|db:test:*|test:integration:db|test:lease-contract|test:e2e:*) needs_database=1 ;;
+    db:test|db:test:*|test:integration:db|test:lease-contract|test:e2e:*|test:web-render) needs_database=1 ;;
   esac
 done
 

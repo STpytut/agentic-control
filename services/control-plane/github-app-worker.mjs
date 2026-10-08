@@ -36,7 +36,7 @@ import { RuntimeSupervisorClient } from "../runtime-supervisor/client.mjs";
 import { runPollLoop, shutdownSignal } from "./worker-loop.mjs";
 import { DEFAULT_APP_STATE_DIR, resolveAppConfig, writeAppSecrets } from "./github-app-config.mjs";
 import { INSTALLATION_LAYOUT } from "../operations/installation-layout.mjs";
-import { PublishError, pullRequestBody, pushApprovedCommit } from "./github-publish.mjs";
+import { PublishError, pullRequestBody, pullRequestTitle, pushApprovedCommit } from "./github-publish.mjs";
 import {
   GithubAppError, createInstallationToken, createIssueComment, createPullRequest, decryptOAuthCode, exchangeOAuthCode, getAppIdentity, getInstallation, convertManifestCode,
   listInstallationRepositories, listLabelledIssues, listUserInstallations, redactSecrets,
@@ -437,11 +437,15 @@ export async function processPublishIntent(intent, {
     // A chat started from an issue closes it when merged (0133). Unknown is
     // no issue: the pull request is the same without the line.
     const issue = await db(`SELECT issue_for_task(:'task_id'::uuid)::text;`, { task_id: intent.task_id }).catch(() => null);
+    // The orchestrator's last handoff names the work better than the chat's
+    // first message does; the title falls back to the task's when there is none.
+    const objective = await db(`SELECT jsonb_build_object('objective',h.objective)::text FROM handoffs h
+      WHERE h.task_id=:'task_id'::uuid ORDER BY h.created_at DESC LIMIT 1;`, { task_id: intent.task_id }).catch(() => null);
     let pr;
     try {
       pr = await openPullRequest({
         installationToken: token, repository: intent.repository_full_name, head: intent.branch,
-        base: intent.base_branch, title: intent.title,
+        base: intent.base_branch, title: pullRequestTitle(intent, objective?.objective),
         body: pullRequestBody({ ...intent, issue_number: Number(issue?.number) || undefined }), secrets,
       });
     } catch (error) {

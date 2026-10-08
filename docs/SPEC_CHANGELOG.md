@@ -1,5 +1,11 @@
 # Spec Changelog
 
+## 2026-10-08 — role chips, pull request titles, pages rendered in the gate (rc.138)
+
+- **Each agent's role is a chip of its own colour** beside its name in the chat: orchestrator, reviewer, executor, analyst.
+- **A pull request is titled by the work, not by the chat's first message**: the orchestrator's last handoff objective, its first sentence, at most 72 characters; the task's title when there is none.
+- **The gate renders the panel's pages** (`test:web-render`): a real panel against a scratch database, connected as `infra_web`, signed in as its owner, with a team, a running chat, a reviewed chat and an analyst's answer. The project list, a project's start, both chats, Team, Workspace and the operator's settings must render with their content and no server error. rc.136's crash, a function passed to a client component, fails it with a 500.
+
 ## 2026-10-08 — the orchestrator waits for its analyst; runtime marks (rc.136)
 
 - **An answer the plan depends on is waited for.** On rc.135's first consultation the orchestrator read consult's receipt ("asked") as the answer missing, asked again, and delegated before the answer came. The instructions, the tool's description and its receipt (`CONSULT_NEXT`) now say the answer arrives after the turn: consult, end the turn, plan when it arrives. A second ask of the same analyst from the same turn returns the open consultation (migration 0148).
