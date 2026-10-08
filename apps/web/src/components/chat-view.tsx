@@ -78,11 +78,16 @@ function executorLine(roster: ProjectWorkspace["agentRoster"], executorAssignmen
 }
 
 // A model's name as the team's catalogue gives it ("GPT-6 Luna"), else its id.
+function modelNamesFor(team: ProjectTeam | null) {
+  const names: Record<string, string> = {};
+  for (const model of team?.models ?? []) if (model.displayName) names[model.modelId] = model.displayName;
+  for (const assignment of team?.assignments ?? []) if (assignment.displayName) names[assignment.modelId] = assignment.displayName;
+  return names;
+}
+
 function modelLabelFor(team: ProjectTeam | null) {
-  const names = new Map<string, string>();
-  for (const model of team?.models ?? []) if (model.displayName) names.set(model.modelId, model.displayName);
-  for (const assignment of team?.assignments ?? []) if (assignment.displayName) names.set(assignment.modelId, assignment.displayName);
-  return (model?: string) => (model ? names.get(model) ?? model : undefined);
+  const names = modelNamesFor(team);
+  return (model?: string) => (model ? names[model] ?? model : undefined);
 }
 
 // Who does what in this chat, said once above it: the messages name their
@@ -172,7 +177,7 @@ export function ChatView({ operator, workspace, activeTask, writeEnabled, view, 
                   <p className="type-app-body mt-1.5 text-ink/80">{action.description}</p>
                   <WorkflowActions action={action} acceptanceCriteria={activeTask.acceptanceCriteria}/>
                 </article>)}
-                <LiveTaskActivity projectId={project.id} taskId={activeTask.id} initialActivity={workspace.taskActivity} awaitingResponse={messages.at(-1)?.role === "user"} modelLabel={modelLabel}/>
+                <LiveTaskActivity projectId={project.id} taskId={activeTask.id} initialActivity={workspace.taskActivity} awaitingResponse={messages.at(-1)?.role === "user"} modelNames={modelNamesFor(projectTeam)}/>
               </ChatScrollArea>
               {/* The host-wide banner stays only where the project's own reading is
                   not available: with it, the composer names the assignment and the

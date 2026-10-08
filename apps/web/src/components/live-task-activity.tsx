@@ -41,14 +41,15 @@ function heartbeatAge(activity: TaskActivity, now: number) {
   return Math.max(0,Math.floor((now-new Date(activity.heartbeatAt).getTime())/1000));
 }
 
-export function LiveTaskActivity({ projectId, taskId, initialActivity, awaitingResponse, modelLabel = (model) => model }: {
+export function LiveTaskActivity({ projectId, taskId, initialActivity, awaitingResponse, modelNames = {} }: {
   projectId: string;
   taskId: string;
   initialActivity: TaskActivity | null;
   awaitingResponse: boolean;
-  // The catalogue's name for a model ("Claude Sonnet (latest)"), as the chat's
-  // messages show it, not the runtime's id ("sonnet").
-  modelLabel?: (model?: string) => string | undefined;
+  // The catalogue's name for each model id ("sonnet" → "Claude Sonnet
+  // (latest)"), as the chat's messages show it. A map, not a function: this is
+  // a client component, and a server page cannot hand it a function (rc.136).
+  modelNames?: Record<string, string>;
 }) {
   const router = useRouter();
   const [activity,setActivity] = useState(initialActivity);
@@ -129,7 +130,7 @@ export function LiveTaskActivity({ projectId, taskId, initialActivity, awaitingR
   return <article className={cx("mb-6 grid grid-cols-[32px_minmax(0,1fr)] gap-3 rounded-lg border p-3.5", tone === "failed" ? "border-danger/50" : tone === "stalled" ? "border-warning/50" : "border-line-strong")} aria-live="polite">
     <RuntimeMark runtime={activity?.runtimeType} fallback={activity?.agentName ?? "?"}/>
     <div className="min-w-0">
-      <header className="flex items-center justify-between gap-3"><span className="flex min-w-0 items-baseline gap-1.5"><strong className="type-meta font-medium">{activity?.agentName ?? "Orchestrator"}</strong><small className="type-mono-small truncate text-muted">{(activity?.model && modelLabel(activity.model)) ?? "Waiting for assignment"}</small></span><Badge tone={tone === "failed" ? "danger" : tone === "stalled" ? "warning" : "active"} className="shrink-0">{phase}</Badge></header>
+      <header className="flex items-center justify-between gap-3"><span className="flex min-w-0 items-baseline gap-1.5"><strong className="type-meta font-medium">{activity?.agentName ?? "Orchestrator"}</strong><small className="type-mono-small truncate text-muted">{activity?.model ? modelNames[activity.model] ?? activity.model : "Waiting for assignment"}</small></span><Badge tone={tone === "failed" ? "danger" : tone === "stalled" ? "warning" : "active"} className="shrink-0">{phase}</Badge></header>
       <p className="type-app-body mt-2 mb-2.5 text-ink/80">{activity?.detail ?? "Your message is durable and waiting to be routed to the agent."}</p>
       {!!activity?.events?.length && <ul className="type-meta mb-2.5 grid list-none gap-0.5 p-0 text-muted">{activity.events.slice(0,3).map((event) => <li key={event.id} className="before:mr-1.5 before:content-['›']">{event.summary}</li>)}</ul>}
       {interruptError && <p className="type-mono-small mb-2 text-danger">{interruptError}</p>}
