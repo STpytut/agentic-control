@@ -360,7 +360,12 @@ export function describeAnalysts(analysts) {
   const list = Array.isArray(analysts) ? analysts : [];
   if (!list.length) return "";
   return [
-    "Analysts on this project's team — read-only members you may ask with platform.consult({member, question}). One reads a snapshot of the last commit and answers once; the answer arrives later as a new message, so ask, then carry on (you may delegate in the same turn). Ask when a careful reading would change the plan or the review — not for what you can see yourself in a moment:",
+    "Analysts on this project's team — read-only members you may ask with platform.consult({member, question}). One reads a snapshot of the last commit and answers once.",
+    "platform.consult only sends the question: the answer cannot reach you in this turn — it arrives as a new message after this turn ends, usually within a minute or two. So:",
+    "- When the plan depends on the answer (the operator asked you to ask first, or you need it to decide), consult, then end your turn: tell the operator whom you asked and that you will plan when the answer arrives. Do not delegate yet.",
+    "- Delegate in the same turn only when the implementation does not depend on the answer (a second opinion for the review, say).",
+    "- Ask each question once. Do not ask again because no answer came back in this turn; it is on its way.",
+    "Ask when a careful reading would change the plan or the review — not for what you can see yourself in a moment:",
     ...list.map((analyst) => `- ${analyst.name} (${analyst.model ?? analyst.runtime_type})${analyst.instructions ? `: ${String(analyst.instructions).replace(/\s+/g, " ")}` : ""}`),
   ].join("\n");
 }

@@ -1,5 +1,10 @@
 # Spec Changelog
 
+## 2026-10-08 — the orchestrator waits for its analyst; runtime marks (rc.136)
+
+- **An answer the plan depends on is waited for.** On rc.135's first consultation the orchestrator read consult's receipt ("asked") as the answer missing, asked again, and delegated before the answer came. The instructions, the tool's description and its receipt (`CONSULT_NEXT`) now say the answer arrives after the turn: consult, end the turn, plan when it arrives. A second ask of the same analyst from the same turn returns the open consultation (migration 0148).
+- **Each runtime has its mark in its vendor's colour** beside messages and the live activity (Claude Code, Codex, OpenCode). The activity card names the model as the catalogue does, not by the runtime's id.
+
 ## 2026-10-08 — analysts: the first member of an agent team (rc.135, Stage 12)
 
 - **An analyst is a read-only member of a project's team** (migration 0147). The operator adds one on the Team page: a name, instructions and a verified model on Claude Code or OpenCode, which now play the `analyst` role (registry, `runtime_roles`, `ROLE_CORE.analyst`). Analysts live in `project_analysts`, apart from the assignments a task's snapshot reads.

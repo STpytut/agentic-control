@@ -4,7 +4,7 @@ import { RuntimeSupervisorClient } from "../runtime-supervisor/client.mjs";
 import { deferReasonFor, issueWorkspaceGrant } from "../runtime-supervisor/workspace-grant.mjs";
 import { driverFor, surfaceOf } from "../runtime-supervisor/drivers/index.mjs";
 import { adapterFor } from "../operations/runtime-adapters.mjs";
-import { PLATFORM_COMMAND_TOOLS } from "../runtime-supervisor/drivers/tool-contracts.mjs";
+import { CONSULT_NEXT, PLATFORM_COMMAND_TOOLS } from "../runtime-supervisor/drivers/tool-contracts.mjs";
 import { DeliveryOutcomeUnknown, startMailbox } from "../runtime-supervisor/run-mailbox.mjs";
 import { launchProvenance } from "../runtime-supervisor/provenance.mjs";
 import { launchReasoningLevel } from "../runtime-supervisor/drivers/reasoning.mjs";
@@ -82,7 +82,7 @@ async function invokePlatformTool(message, { driver, job, workerId, threadId, tu
       { job_id: job.id, worker_id: workerId, call_id: params.callId,
         member: typeof args.member === "string" ? args.member : "", question: args.question },
     );
-    return driver.toolBridge.answer(receipt);
+    return driver.toolBridge.answer({ ...receipt, next: CONSULT_NEXT });
   }
   throw new Error(`unsupported platform tool: ${params.tool}`);
 }
