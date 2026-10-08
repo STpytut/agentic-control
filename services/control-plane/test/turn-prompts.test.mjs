@@ -8,8 +8,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  buildAnalystPrompt, buildExecutorPrompt, describeAnalysts, describeConsultationResult, describeOperatorChangeRequests, describeRepositoryContext, describeReviewEvidence, describeWorkflowEvent,
-  ORCHESTRATOR_INSTRUCTIONS, workflowUpdates,
+  analystInstructions, buildAnalystPrompt, buildExecutorPrompt, describeAnalysts, describeConsultationResult, describeOperatorChangeRequests, describeRepositoryContext, describeReviewEvidence, describeWorkflowEvent,
+  developerInstructionsFor, EXECUTOR_INSTRUCTIONS, ORCHESTRATOR_INSTRUCTIONS, turnStateFor, workflowUpdates,
 } from "../turn-prompts.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -46,7 +46,9 @@ test("an answered question is stated with its answer, as final, and not left ins
 test("a first run with no answers says nothing about answers", () => {
   const prompt = buildExecutorPrompt({ ...resumed, revision_number: 1, instructions: resumed.instructions.slice(0, 2) });
   assert.doesNotMatch(prompt, /operator has answered/i);
-  assert.match(prompt, /call exactly one terminal control-plane tool/);
+  // rc.143: the role's standing rules are the run's system prompt, not the message.
+  assert.match(EXECUTOR_INSTRUCTIONS, /call exactly one terminal control-plane tool/);
+  assert.doesNotMatch(prompt, /call exactly one terminal control-plane tool/);
 });
 
 test("an answer whose question cannot be read is still stated", () => {
@@ -151,15 +153,15 @@ test("the orchestrator is not told its workspace is read-only, because the grant
   // And the worker uses these words, not a copy of the old ones.
   const worker = readFileSync(path.join(HERE, "../orchestrator-worker.mjs"), "utf8");
   assert.doesNotMatch(worker, /This channel is read-only/);
-  assert.match(worker, /ORCHESTRATOR_INSTRUCTIONS,/);
+  assert.match(worker, /developerInstructionsFor\(context\)/);
+  assert.ok(developerInstructionsFor({ analysts: [] }).startsWith(ORCHESTRATOR_INSTRUCTIONS));
   assert.match(worker, /deliver_review_evidence/);
 });
 
 // Sprint B, B0/B3: the platform publishes a commit, so the executor is told to
 // make one, and the reviewer is told a tree no commit holds is not complete.
 test("the executor is told to commit its own changes, and the reviewer that an uncommitted tree is not done", () => {
-  const prompt = buildExecutorPrompt({ handoff_id: "h", task_id: "t", revision_number: 1, objective: "o",
-    instructions: [], constraints: [], acceptance_criteria: [], relevant_paths: [] });
+  const prompt = EXECUTOR_INSTRUCTIONS;
   assert.match(prompt, /Commit your work on the current branch before finishing/);
   assert.match(prompt, /Do not commit files you did not change, and do not push/);
   assert.ok(prompt.indexOf("Commit your work") < prompt.indexOf("Then call exactly one terminal"),
@@ -298,16 +300,19 @@ test("a project with no map and no history is told nothing", () => {
 
 // ------------------------------------------------------------------ analysts
 
-test("an analyst is told who it is, how to work, the layout and the question, fenced", () => {
-  const prompt = buildAnalystPrompt({ analyst: "Security reviewer", task_title: "Add a\nstreak", instructions: "Look for injection.",
-    layout: "src/ (3 files)", question: "Is ```this``` safe?" });
-  assert.match(prompt, /You are Security reviewer, an analyst/);
+test("an analyst is told who it is and how to work as its system prompt, and the layout and the question as its message, fenced", () => {
+  const context = { analyst: "Security reviewer", task_title: "Add a\nstreak", instructions: "Look for injection.",
+    layout: "src/ (3 files)", question: "Is ```this``` safe?" };
+  const role = analystInstructions(context);
+  assert.match(role, /You are Security reviewer, an analyst/);
+  assert.match(role, /You cannot run commands, change files/);
+  assert.match(role, /How the operator wants you to work:\nLook for injection\./);
+  assert.doesNotMatch(analystInstructions({ analyst: "A" }), /How the operator wants/);
+  const prompt = buildAnalystPrompt(context);
   assert.match(prompt, /task "Add a streak"/);
-  assert.match(prompt, /You cannot run commands, change files/);
-  assert.match(prompt, /How the operator wants you to work:\nLook for injection\./);
   assert.match(prompt, /```\nsrc\/ \(3 files\)\n```/);
   assert.match(prompt, /````\nIs ```this``` safe\?\n````/);
-  assert.doesNotMatch(buildAnalystPrompt({ analyst: "A", question: "Why so?" }), /How the operator wants/);
+  assert.doesNotMatch(prompt, /You are Security reviewer|Look for injection/, "the role is not repeated in the message");
 });
 
 test("the orchestrator is told its analysts, and nothing when there are none", () => {
@@ -331,4 +336,18 @@ test("an analyst's answer reaches the orchestrator as evidence, and a failure sa
   assert.match(describeConsultationResult("consultation.failed", { analyst: "Reviewer", question: "Where?", failure: "the owner stopped the question" }),
     /^The owner stopped your question to Reviewer before it was answered\. Do not ask it again/);
   assert.match(failed, /^Your question to Reviewer was not answered\. What the platform recorded[^\n]*\n```\nthe analyst gave no answer\n```/);
+});
+
+// rc.143: the orchestrator's system prompt holds what stays the same from turn
+// to turn, so it stays cached; the task's state and version are the message's.
+test("the orchestrator's instructions carry no per-turn state, and its turn state is the message's", () => {
+  const context = { task_title: "Add a streak", task_id: "t1", task_status: "planning", task_version: 7,
+    task_objective: "Count days", task_acceptance_criteria: ["shows the streak"], executor: null, analysts: [] };
+  const system = developerInstructionsFor(context);
+  assert.ok(system.startsWith(ORCHESTRATOR_INSTRUCTIONS));
+  assert.match(system, /Stored objective: Count days/);
+  assert.doesNotMatch(system, /Task state|planning|task version/);
+  assert.equal(developerInstructionsFor({ ...context, task_status: "reviewing", task_version: 8 }), system,
+    "a new state or version leaves the system prompt as it was");
+  assert.equal(turnStateFor(context), "Task state: planning; task version: 7.");
 });

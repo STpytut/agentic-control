@@ -70,6 +70,30 @@ const DENIED_READS = "Read(~/.claude/**),Read(~/.claude.json)";
 // shown on the host with a probe agent, listed only under `user,project`.
 const withSubagents = (tools, subagents) => (subagents ? `${tools},Task` : tools);
 
+// The platform's own subagents (rc.143), beside Claude Code's built-in ones and
+// only where the member allows subagents: helpers on the cheaper model, each
+// with no more tools than the run has. Given on the command line (`--agents`),
+// so nothing of the repository's defines them. Shown on the host at 2.1.294:
+// the init event lists them, `explorer` ran on Haiku under a Sonnet run.
+const EXPLORER = Object.freeze({
+  description: "Finds where things are in this codebase and reports file paths with line numbers. Read-only; use it to locate code before reading or changing it.",
+  prompt: "You locate code for the agent that called you. Search with Glob and Grep, read what matches, and report each finding as path:line with a short quote. Say what you could not find. Never change files.",
+  tools: ["Read", "Glob", "Grep"],
+  model: "haiku",
+});
+const TEST_RUNNER = Object.freeze({
+  description: "Runs the project's tests or the commands it is given and reports what failed, with file, line and error. Use it to check work without reading long test output yourself.",
+  prompt: "You run checks for the agent that called you. Run the tests or commands it names (or find the project's test command), then report: what ran, what passed, and for each failure the test, file:line and the error message, briefly. Never change files, never commit.",
+  tools: ["Read", "Glob", "Grep", "Bash"],
+  model: "haiku",
+});
+const PLATFORM_SUBAGENTS = Object.freeze({
+  task: Object.freeze({ explorer: EXPLORER, "test-runner": TEST_RUNNER }),
+  consult: Object.freeze({ explorer: EXPLORER }),
+});
+const platformSubagents = (surface, subagents) => (subagents && PLATFORM_SUBAGENTS[surface]
+  ? ["--agents", JSON.stringify(PLATFORM_SUBAGENTS[surface])] : []);
+
 const SURFACE_ARGS = Object.freeze({
   project: () => [
     "--tools", READ_TOOLS,
@@ -270,8 +294,12 @@ export const claudeDriver = Object.freeze({
     // default, and the flag does not persist past this process.
     // A member's fallback (rc.142, 0152) on an executor's or analyst's run:
     // Claude Code switches to it when the model is overloaded or not available.
+    // A role's instructions (rc.143) are appended to Claude Code's own system
+    // prompt, never in place of it, on every process: a resumed session keeps
+    // its messages, not its system prompt, so a turn's instructions are not
+    // piled up in the conversation and the prefix stays cached.
     argv: ({ model, sessionId = null, newSessionId = null, prompt, surface = "gate", reasoningEffort = null, subagents = false,
-      fallbackModel = null }) => {
+      fallbackModel = null, systemPrompt = null }) => {
       if (surface === "account") return ["auth", "login"];
       const surfaceArgs = SURFACE_ARGS[surface];
       if (!surfaceArgs) throw new Error(`Claude Code has no ${JSON.stringify(surface)} surface`);
@@ -282,6 +310,8 @@ export const claudeDriver = Object.freeze({
         "-p", ...surfaceArgs({ subagents }), "--setting-sources", "user", ...sessionArgs({ sessionId, newSessionId }),
         ...(effort ? ["--effort", effort] : []),
         ...(fallback ? ["--fallback-model", fallback] : []),
+        ...(systemPrompt && surface !== "gate" ? ["--append-system-prompt", systemPrompt] : []),
+        ...platformSubagents(surface, subagents),
         "--output-format", "stream-json", "--verbose", "--model", model, prompt,
       ];
     },
@@ -298,7 +328,7 @@ export const claudeDriver = Object.freeze({
     // instead of failing runs once promoted. rc.142 added the last three.
     flags: Object.freeze(["--tools", "--allowedTools", "--disallowedTools", "--mcp-config", "--strict-mcp-config",
       "--permission-mode", "--setting-sources", "--session-id", "--resume", "--effort", "--output-format",
-      "--json-schema", "--fallback-model", "--no-session-persistence"]),
+      "--json-schema", "--fallback-model", "--no-session-persistence", "--append-system-prompt", "--agents"]),
     // The catalog holds Claude Code's own names for its models.
     qualifyModel: (_provider, model) => model,
   }),

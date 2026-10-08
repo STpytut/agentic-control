@@ -737,3 +737,48 @@ test("an analyst's structured output is its answer, rendered as the report", () 
     "**Open questions**\n- Is reset also on load?",
   ].join("\n\n"));
 });
+
+// rc.143: a role's instructions apart from the message, where each runtime takes them.
+test("each runtime takes a role's instructions where it keeps a system prompt, and OpenCode at the head of the prompt", () => {
+  const role = "You are the implementation worker.\nCommit your \"work\".";
+  const claude = driverFor("claude");
+  const after = (argv, flag) => argv[argv.indexOf(flag) + 1];
+  for (const surface of ["project", "task", "consult"]) {
+    const argv = claude.run.argv({ model: "opus", prompt: "Do it", surface, systemPrompt: role });
+    assert.equal(after(argv, "--append-system-prompt"), role, surface);
+    assert.equal(argv.at(-1), "Do it", "the message stays the prompt, last");
+    assert.ok(!argv.includes("--system-prompt"), "Claude Code's own system prompt is kept, never replaced");
+  }
+  assert.ok(!claude.run.argv({ model: "opus", prompt: "x", surface: "gate", systemPrompt: role }).includes("--append-system-prompt"));
+  assert.ok(!claude.run.argv({ model: "opus", prompt: "x", surface: "task" }).includes("--append-system-prompt"));
+
+  const opencode = driverFor("opencode");
+  assert.equal(opencode.run.argv({ model: "m", prompt: "Do it", systemPrompt: role }).at(-1), `${role}\n\nDo it`);
+  assert.equal(opencode.run.argv({ model: "m", prompt: "Do it" }).at(-1), "Do it");
+
+  const codex = driverFor("codex");
+  const version = adapterFor("codex").baselineVersion ?? "0.160.0";
+  const argv = codex.run.argv({ surface: "task", model: "gpt", prompt: "Do it", version, systemPrompt: role });
+  assert.ok(argv.includes(`developer_instructions=${JSON.stringify(role)}`));
+  assert.ok(argv.indexOf(`developer_instructions=${JSON.stringify(role)}`) < argv.indexOf("exec"), "a config override precedes the subcommand");
+  assert.equal(argv.at(-1), "Do it");
+});
+
+test("the platform's subagents are offered to a Claude Code writer or analyst only with subagents allowed", () => {
+  const claude = driverFor("claude");
+  const agentsOf = (argv) => (argv.includes("--agents") ? JSON.parse(argv[argv.indexOf("--agents") + 1]) : null);
+  assert.equal(agentsOf(claude.run.argv({ model: "opus", prompt: "x", surface: "task" })), null);
+  const task = agentsOf(claude.run.argv({ model: "opus", prompt: "x", surface: "task", subagents: true }));
+  assert.deepEqual(Object.keys(task).sort(), ["explorer", "test-runner"]);
+  assert.deepEqual(task.explorer.tools, ["Read", "Glob", "Grep"], "the explorer cannot write");
+  assert.ok(task["test-runner"].tools.every((tool) => ["Read", "Glob", "Grep", "Bash"].includes(tool)), "no tool the run lacks");
+  const consult = agentsOf(claude.run.argv({ model: "opus", prompt: "x", surface: "consult", subagents: true }));
+  assert.deepEqual(Object.keys(consult), ["explorer"], "an analyst runs nothing");
+  assert.equal(agentsOf(claude.run.argv({ model: "opus", prompt: "x", surface: "project", subagents: true })), null);
+  assert.equal(agentsOf(claude.run.argv({ model: "opus", prompt: "x", surface: "gate", subagents: true })), null);
+  // Agents are of no use without the tool that starts them.
+  for (const surface of ["task", "consult"]) {
+    const argv = claude.run.argv({ model: "opus", prompt: "x", surface, subagents: true });
+    for (const flag of ["--tools", "--allowedTools"]) assert.match(argv[argv.indexOf(flag) + 1], /\bTask\b/, `${surface} ${flag}`);
+  }
+});

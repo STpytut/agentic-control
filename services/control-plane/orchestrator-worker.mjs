@@ -9,7 +9,7 @@ import { DeliveryOutcomeUnknown, startMailbox } from "../runtime-supervisor/run-
 import { launchProvenance } from "../runtime-supervisor/provenance.mjs";
 import { launchReasoningLevel } from "../runtime-supervisor/drivers/reasoning.mjs";
 import { runLeasedJob, runPollLoop, shutdownSignal } from "./worker-loop.mjs";
-import { describeAnalysts, describeConsultationResult, describeOperatorChangeRequests, describeRepositoryContext, describeReviewEvidence, ORCHESTRATOR_INSTRUCTIONS, workflowUpdates } from "./turn-prompts.mjs";
+import { describeConsultationResult, describeRepositoryContext, describeReviewEvidence, developerInstructionsFor, turnStateFor, workflowUpdates } from "./turn-prompts.mjs";
 import { runConsultationWorker } from "./consultation-worker.mjs";
 
 // A review turn under either name until 11.2 N6 (migration 0073).
@@ -135,28 +135,6 @@ function recordActivityEvent(jobId, workerId, runtime, event) {
   return activityChain;
 }
 
-// What the orchestrator is told about its task, whichever runtime it is: a
-// channel runtime receives it as developer instructions, a batch runtime at the
-// head of its prompt.
-function developerInstructionsFor(context) {
-  return [
-    ORCHESTRATOR_INSTRUCTIONS,
-    `Active task: ${context.task_title} (${context.task_id}).`,
-    `Task state: ${context.task_status}; task version: ${context.task_version}.`,
-    `Stored objective: ${context.task_objective}`,
-    `Stored acceptance criteria: ${JSON.stringify(context.task_acceptance_criteria)}`,
-    // Empty for a task nobody revised from the panel, so nothing is added.
-    describeOperatorChangeRequests(context.task_operator_change_requests),
-    context.followup_of_task_id
-      ? `Follow-up contract: this is a new planning task derived from terminal task ${context.followup_of_task_id}. Never reopen or revise the terminal source. Translate the user's requested corrections into the active follow-up contract and call platform.delegate_task for this active task. Do not call platform.request_revision until this follow-up has its own completed implementation.`
-      : "This task is not a terminal-task follow-up.",
-    context.executor
-      ? `Selected executor: ${context.executor.agent_name} (${context.executor.runtime_type}, ${context.executor.model}).`
-      : "No enabled executor is assigned to this task.",
-    describeAnalysts(context.analysts),
-  ].filter(Boolean).join("\n");
-}
-
 // What the turn is given besides the message: what happened in this
 // conversation since the orchestrator last spoke — a writer finishing while
 // this message waited, say — read in the database's order (turn-prompts.mjs;
@@ -228,7 +206,8 @@ async function executeBatchTurn(job, context, { driver, label, grant, workerId, 
     const result = await supervisor.run({
       runtime: driver.name, surface: "project", jobId: job.id, projectId: context.project_id,
       grantToken: grant.token, workerId,
-      prompt: [developerInstructionsFor(context), preamble, context.content].filter(Boolean).join("\n\n"),
+      systemPrompt: developerInstructionsFor(context),
+      prompt: [turnStateFor(context), preamble, context.content].filter(Boolean).join("\n\n"),
     });
     if (result.interrupted) {
       return await queryJson(`SELECT finalize_runtime_interrupt(:'job_id'::bigint,:'worker_id',:'thread_id')::text;`,
@@ -361,7 +340,7 @@ async function executeJob(job, { workerId, lease }) {
     const preamble = await turnPreamble(job, context, workerId);
     const turnId = await appServer.startTurn({
       sessionId: threadId,
-      text: [preamble, context.content].filter(Boolean).join("\n"),
+      text: [turnStateFor(context), preamble, context.content].filter(Boolean).join("\n"),
       clientMessageId: context.source_event_id,
       // The orchestrator's level from the task's snapshot, on every turn:
       // Codex keeps a turn's effort for the turns after it (0111).

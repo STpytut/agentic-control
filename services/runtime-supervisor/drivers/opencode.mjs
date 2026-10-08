@@ -194,12 +194,16 @@ export const opencodeDriver = Object.freeze({
     // the model does not have, silently (session/llm/request.ts:80-91 at
     // v1.18.32), so the database accepts only one the model's catalog entry
     // lists; here the value is held to a token.
-    argv: ({ model, sessionId = null, prompt, reasoningEffort = null }) => {
+    // A role's instructions (rc.143) head the prompt: an OpenCode agent's
+    // `prompt` replaces OpenCode's own system prompt for the provider rather
+    // than adding to it (session/llm/request.ts at v1.18.35), and that prompt
+    // is how its tools are explained to the model.
+    argv: ({ model, sessionId = null, prompt, reasoningEffort = null, systemPrompt = null }) => {
       const variant = launchReasoningLevel(opencodeDriver, reasoningEffort);
       return [
         "run", "--pure", "--auto", "--format", "json", "--model", model,
         ...(variant ? ["--variant", variant] : []),
-        ...opencodeDriver.sessions.args(sessionId), prompt,
+        ...opencodeDriver.sessions.args(sessionId), systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt,
       ];
     },
     environment: runEnvironment,

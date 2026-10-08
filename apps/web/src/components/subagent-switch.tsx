@@ -12,5 +12,5 @@ export function SubagentSwitch({ memberId, allowed, busy, onChange }: {
   return <Checkbox className="mt-2" checked={allowed} disabled={Boolean(busy)}
     onChange={(event) => onChange(event.target.checked)}
     label={busy === `subagents:${memberId}` ? "Saving…" : "Allow subagents"}
-    description="The runtime may start its own helper agents inside this member's run. Faster on large code; their tokens count as this member's."/>;
+    description="The runtime may start helper agents inside this member's run: its own, and on Claude Code the platform's code explorer (and test runner for executors) on the cheaper Haiku model. Faster on large code; their tokens count as this member's."/>;
 }
