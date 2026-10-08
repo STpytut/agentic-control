@@ -12,6 +12,7 @@ import { resolvedModelOf, type OperatorModels } from "@/lib/models";
 import { TeamModelPicker, type PickerMode } from "@/components/team-model-picker";
 import { ReasoningSelect } from "@/components/reasoning-select";
 import { defaultReasoningLabel } from "@/lib/reasoning";
+import { TeamAnalysts } from "@/components/team-analysts";
 
 const hint = "type-meta mt-1 text-muted";
 
@@ -130,6 +131,8 @@ export function ProjectTeamTab({ projectId, team, readiness, models = null }: {
         </li>)}</ul>
       </div>}
     </Card>
+
+    <TeamAnalysts team={team} models={models} busy={busy} submit={submit}/>
 
     <Card as="section" className="min-w-0" aria-labelledby="team-roles">
       <h2 id="team-roles" className="type-card-title mb-3">What each role may do</h2>

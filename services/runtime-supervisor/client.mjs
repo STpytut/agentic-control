@@ -42,9 +42,13 @@ const gateRequestTimeoutMs = 5 * 60_000 + 2 * 60_000;
 // Which budget a run waits on, by the kind of workspace its surface runs in —
 // a fenced task run, or a gate's scratch run. Named, never a literal: the
 // supervisor's cap and this one have to move together (defect 98).
+// An analyst's run (0147): its 15 minutes, the snapshot and a margin.
+const snapshotRequestTimeoutMs = 20 * 60_000;
+
 const RUN_BUDGETS = Object.freeze({
   grant: runRequestTimeoutMs,
   gate: gateRequestTimeoutMs,
+  snapshot: snapshotRequestTimeoutMs,
 });
 
 // An account operation can start a loopback server and wait on a provider.
@@ -368,7 +372,9 @@ export class RuntimeSupervisorClient extends EventEmitter {
     const spec = surfaceFor(runtime, surface, "batch");
     // An orchestrator's read-only turn (11.2 N4): the job and the worker that
     // leases it, and the prompt. The supervisor reads the rest from the job.
-    const message = spec.workspace === "grant" && spec.grantMode === "read_only"
+    const message = spec.workspace === "snapshot"
+      ? { job_id: jobId, prompt, worker_id: workerId }
+      : spec.workspace === "grant" && spec.grantMode === "read_only"
       ? { job_id: jobId, project_id: projectId, grant_token: grantToken, prompt, worker_id: workerId }
       : spec.workspace === "grant"
       ? {

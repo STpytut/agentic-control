@@ -85,6 +85,8 @@ export const SERVICE_RUNTIME_ASSETS = new Map([
     "OpenCode tool definition; an OpenCode orchestrator's turn calls delegate_task and its run socket implements it (11.2 N4)"],
   ["runtime-supervisor/opencode-tools/request_revision.ts",
     "OpenCode tool definition; an OpenCode orchestrator's review calls request_revision and its run socket implements it (11.2 N4)"],
+  ["runtime-supervisor/opencode-tools/consult.ts",
+    "OpenCode tool definition; an OpenCode orchestrator's turn calls consult and its run socket implements it (Stage 12, 0147)"],
   ["runtime-supervisor/opencode-tools/request_user_input.ts",
     "OpenCode tool definition; the executor is asked to call request_user_input and the worker tool gateway implements it"],
   // Started by Claude Code from a turn's --mcp-config, by path (drivers/claude.mjs);

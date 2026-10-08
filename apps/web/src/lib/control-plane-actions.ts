@@ -108,6 +108,14 @@ function reasoningLevel(value: unknown, name = "reasoningEffort") {
   return value;
 }
 
+// An analyst's name or instructions (0147): text within its bound; the
+// database trims it and refuses an empty name.
+function analystText(value: unknown, limit: number, name: string) {
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string" || value.length > limit) throw new Error(`${name} is invalid`);
+  return value;
+}
+
 // Each executor's level, keyed by its model and returned in the models' order.
 function executorReasoningLevels(value: unknown, entryIds: string[]) {
   if (value === undefined || value === null) return entryIds.map(() => "");
@@ -862,6 +870,35 @@ export async function performControlPlaneAction(body: Record<string, unknown>, o
       `SELECT disable_project_executor(:'project_id'::uuid,:'owner_id'::uuid,:'version'::bigint,:'assignment_id'::uuid,:'actor',:'correlation')::text;`,
       { project_id: ownedProjectId, owner_id: operator.userId, version: String(version(body.teamVersion)),
         assignment_id: uuid(body.assignmentId, "assignmentId"), actor, correlation },
+    );
+  }
+
+  // Stage 12 (0147): the team's analysts. The database checks the owner, the
+  // team version, the model and the name, as for executors.
+  if (kind === "team_add_analyst") {
+    return executeJson(
+      `SELECT add_project_analyst(:'project_id'::uuid,:'owner_id'::uuid,:'version'::bigint,:'entry_id'::uuid,
+        :'name',:'instructions',:'actor',:'correlation',:'reasoning_effort')::text;`,
+      { project_id: ownedProjectId, owner_id: operator.userId, version: String(version(body.teamVersion)),
+        entry_id: uuid(body.entryId, "entryId"), name: analystText(body.name, 60, "name"),
+        instructions: analystText(body.instructions, 4000, "instructions"),
+        reasoning_effort: reasoningLevel(body.reasoningEffort), actor, correlation },
+    );
+  }
+  if (kind === "team_update_analyst") {
+    return executeJson(
+      `SELECT update_project_analyst(:'project_id'::uuid,:'owner_id'::uuid,:'version'::bigint,:'analyst_id'::uuid,
+        :'name',:'instructions',:'actor',:'correlation')::text;`,
+      { project_id: ownedProjectId, owner_id: operator.userId, version: String(version(body.teamVersion)),
+        analyst_id: uuid(body.analystId, "analystId"), name: analystText(body.name, 60, "name"),
+        instructions: analystText(body.instructions, 4000, "instructions"), actor, correlation },
+    );
+  }
+  if (kind === "team_remove_analyst") {
+    return executeJson(
+      `SELECT remove_project_analyst(:'project_id'::uuid,:'owner_id'::uuid,:'version'::bigint,:'analyst_id'::uuid,:'actor',:'correlation')::text;`,
+      { project_id: ownedProjectId, owner_id: operator.userId, version: String(version(body.teamVersion)),
+        analyst_id: uuid(body.analystId, "analystId"), actor, correlation },
     );
   }
 

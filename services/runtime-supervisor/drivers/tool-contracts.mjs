@@ -42,6 +42,21 @@ export const PLATFORM_COMMAND_TOOLS = Object.freeze([
       additionalProperties: false,
     },
   }),
+  // Stage 12 (0147): one question to one of the project's analysts. The answer
+  // is not this call's result: it arrives later as a new turn.
+  Object.freeze({
+    name: "consult",
+    description: "Ask one of the project's analysts to read the code and answer a question. The answer arrives later as a new message; this call only asks.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        member: { type: "string", description: "The analyst's name; may be empty when the project has exactly one" },
+        question: { type: "string", minLength: 10, maxLength: 8000 },
+      },
+      required: ["question"],
+      additionalProperties: false,
+    },
+  }),
 ]);
 
 // The names the orchestrator's run socket accepts (11.2 N4): a runtime whose

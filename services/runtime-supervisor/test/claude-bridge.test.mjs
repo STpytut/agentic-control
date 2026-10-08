@@ -88,7 +88,7 @@ test("the stdio framing answers line by line and ignores what is not JSON", asyn
   input.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" })}\n`);
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(lines.length, 1);
-  assert.deepEqual(JSON.parse(lines[0]).result.tools.map((tool) => tool.name), ["delegate_task", "request_revision"]);
+  assert.deepEqual(JSON.parse(lines[0]).result.tools.map((tool) => tool.name), ["delegate_task", "request_revision", "consult"]);
   input.end();
   await new Promise((resolve) => setTimeout(resolve, 5));
   assert.equal(exited, 0);
@@ -120,5 +120,5 @@ test("a reports bridge lists and sends the executor's terminal reports, and noth
   assert.equal(sent.length, 2);
   // Without the switch the bridge is the orchestrator's, as it always was.
   const commands = await handleMessage({ jsonrpc: "2.0", id: 5, method: "tools/list" }, { environment: {} });
-  assert.deepEqual(commands.result.tools.map((tool) => tool.name), ["delegate_task", "request_revision"]);
+  assert.deepEqual(commands.result.tools.map((tool) => tool.name), ["delegate_task", "request_revision", "consult"]);
 });

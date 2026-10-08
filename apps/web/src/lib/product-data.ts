@@ -115,7 +115,7 @@ export type ChatMessage = {
   eventType: string;
   // The part the author plays in the task, said next to its name: "Codex" alone
   // did not say whether it planned, reviewed or wrote the code.
-  actorRole?: "orchestrator" | "reviewer" | "executor";
+  actorRole?: "orchestrator" | "reviewer" | "executor" | "analyst";
   // The model the message was written with, as the runtime recorded it.
   model?: string;
   // A workflow record the operator should not miss (a run that ended without
@@ -547,6 +547,19 @@ function interactionMessage(event: EventSummary, sensitive: boolean): ChatMessag
     const action = typeof payload.requested_action === "string" && payload.requested_action.trim() ? `\n\n${payload.requested_action}` : "";
     return { ...base, role: "agent", author: actorName(event, "to", "The executor"), actorRole: "executor", content: `Blocked: ${payload.reason}${action}` };
   }
+  // Stage 12 (0147): the orchestrator's question to an analyst, and the
+  // analyst's answer as its own message, with the model that wrote it.
+  if (event.eventType === "consultation.requested" && typeof payload.question === "string") {
+    return { ...base, role: "system", author: "", content: `The orchestrator asked ${String(payload.analyst ?? "an analyst")}: ${payload.question}` };
+  }
+  if (event.eventType === "consultation.answered" && typeof payload.answer === "string") {
+    return { ...base, role: "agent", author: String(payload.analyst ?? "Analyst"), actorRole: "analyst",
+      ...(typeof payload.model === "string" && payload.model ? { model: payload.model } : {}), content: payload.answer };
+  }
+  if (event.eventType === "consultation.failed") {
+    return { ...base, role: "system", author: "", notice: true,
+      content: `${String(payload.analyst ?? "The analyst")} did not answer: ${String(payload.failure ?? "no answer")}. The orchestrator carries on without it.` };
+  }
   if (event.eventType === "interaction.resolved") {
     const response = (payload.response as Record<string, unknown> | undefined)?.response;
     if (typeof response !== "string") return null;
@@ -558,12 +571,17 @@ function interactionMessage(event: EventSummary, sensitive: boolean): ChatMessag
 export function conversationMessages(events: EventSummary[], task?: TaskSummary): ChatMessage[] {
   let sensitive = false;
   const sides: Sides = { orchestrator: task?.orchestratorRuntime ? runtimeLabel(task.orchestratorRuntime) : "The orchestrator", executor: "the executor" };
+  // The resumed turn after an analyst's answer (0147) is not a review.
+  let afterConsultation = false;
   return events.map((event) => {
     if (event.eventType === "run.input_requested") sensitive = (event.payload as Record<string, unknown>).sensitivity === "sensitive";
     const actors = (event.actors ?? {}) as Json;
     if (actors.from_runtime) sides.orchestrator = runtimeLabel(String(actors.from_runtime));
     if (actors.to_runtime) sides.executor = runtimeLabel(String(actors.to_runtime));
     const message = interactionMessage(event, sensitive) ?? messageFromEvent(event, task, { ...sides });
+    if (message.actorRole === "reviewer" && afterConsultation) message.actorRole = "orchestrator";
+    if (event.eventType.startsWith("consultation.")) afterConsultation = event.eventType !== "consultation.requested";
+    else if (event.eventType !== "chat.agent_message") afterConsultation = false;
     if (event.eventType === "changes.requested") sides.revision = true;
     if (event.eventType === "implementation.requested" || event.eventType === "chat.user_message") sides.revision = false;
     return message;
@@ -1029,12 +1047,16 @@ export async function getTaskActivity(ownerId: string, projectId: string, taskId
             WHEN 'completed' THEN 'The runtime job completed'
             ELSE 'The runtime job needs operator attention' END) END AS detail,
          -- What ran, where it was recorded (0071), before what was assigned.
-         COALESCE(sa.name,ra.name,ea.name,oa.name) AS agent_name,
-         COALESCE(sel.runtime_type,rrp.runtime_type,erp.runtime_type,orp.runtime_type) AS runtime_type,
+         -- An analyst's run (0147) names the analyst its question named.
+         COALESCE(CASE WHEN j.job_type='consultation_run' THEN source_event.payload->>'analyst' END,
+           sa.name,ra.name,ea.name,oa.name) AS agent_name,
+         COALESCE(CASE WHEN j.job_type='consultation_run' THEN source_event.payload->>'runtime_type' END,
+           sel.runtime_type,rrp.runtime_type,erp.runtime_type,orp.runtime_type) AS runtime_type,
          COALESCE(
+           CASE WHEN j.job_type='consultation_run' THEN source_event.payload->>'model' END,
            sel.model,
            CASE WHEN j.job_type='implementation_run' THEN snapshot_executor.model_id END,
-           CASE WHEN j.job_type<>'implementation_run' THEN snapshot.orchestrator->>'model_id' END,
+           CASE WHEN j.job_type NOT IN ('implementation_run','consultation_run') THEN snapshot.orchestrator->>'model_id' END,
            rrp.model,erp.model,orp.model
          ) AS model,
         -- The Stop button: whether the driver recorded for this job declares
@@ -1441,7 +1463,8 @@ export async function getProjectTeam(projectId: string, ownerId: string): Promis
   // The team and, beside it, each member's reasoning level and the levels of
   // the models the tab offers (0111).
   const rows = await queryJsonRows(`SELECT (project_team(:'project_id'::uuid,:'owner_id'::uuid)
-      || jsonb_build_object('reasoning',project_team_reasoning(:'project_id'::uuid,:'owner_id'::uuid)))::text;`,
+      || jsonb_build_object('reasoning',project_team_reasoning(:'project_id'::uuid,:'owner_id'::uuid),
+        'analysts',project_analyst_list(:'project_id'::uuid,:'owner_id'::uuid)))::text;`,
     { project_id: projectId, owner_id: ownerId });
   return rows[0] ? projectTeamFromRow(rows[0]) : null;
 }

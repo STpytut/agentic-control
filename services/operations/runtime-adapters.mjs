@@ -289,10 +289,11 @@ const ADAPTERS = {
     // for two implementations on the host (rc.66). Every run records its peak.
     memoryEstimateMb: 600,
     // The executor, and since 11.2 N4 an orchestrator too: a turn is a batch
-    // run held read-only by the kernel (read-only-launch.mjs).
-    roles: ["orchestrator", "executor"],
+    // run held read-only by the kernel (read-only-launch.mjs). An analyst too
+    // (Stage 12, 0147): a read-only batch run on a snapshot.
+    roles: ["orchestrator", "executor", "analyst"],
     dispatch: {
-      jobTypes: ["orchestrator_turn", "resume_orchestrator", "implementation_run"],
+      jobTypes: ["orchestrator_turn", "resume_orchestrator", "implementation_run", "consultation_run"],
       connectionProvider: "opencode",
     },
     units: ["infra-cod-opencode-account-worker"],
@@ -408,10 +409,11 @@ const ADAPTERS = {
     // the subscription's credentials (probe 10). Now its Bash runs in the sandbox
     // shell with ~/.claude and ~/.claude.json covered (M0's launcher, via
     // CLAUDE_CODE_SHELL), and its Read is denied them as before (rc.68);
-    // qualification proves it with login.isolated on the task surface.
-    roles: ["orchestrator", "executor"],
+    // qualification proves it with login.isolated on the task surface. An
+    // analyst too (Stage 12, 0147): Read, Glob and Grep on a snapshot.
+    roles: ["orchestrator", "executor", "analyst"],
     dispatch: {
-      jobTypes: ["orchestrator_turn", "resume_orchestrator", "implementation_run"],
+      jobTypes: ["orchestrator_turn", "resume_orchestrator", "implementation_run", "consultation_run"],
       connectionProvider: "claude",
     },
     // Inside ~/.claude, what the sandbox shell must still reach: Claude Code has

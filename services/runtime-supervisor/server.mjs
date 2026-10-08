@@ -36,6 +36,7 @@ import { createDeprovisionDeadline, createProjectSingleFlight } from "./deprovis
 import { githubWorkspaceAction, isPublishAction, isSyncAction } from "./github-workspace-protocol.mjs";
 import { applyWorkspaceSync } from "./workspace-sync.mjs";
 import { buildRepositoryMap } from "./repository-map.mjs";
+import { buildSnapshot } from "./snapshot.mjs";
 import { exportApprovedCommit } from "./publish-export.mjs";
 import { startMailbox } from "./run-mailbox.mjs";
 import { ensureRunToolRoot, openRunToolSocket, sweepRunToolSockets } from "./worker-tool-socket.mjs";
@@ -654,13 +655,13 @@ function runAsRuntimeUser(user, workspace, command, args,
 // `command`, not a literal: git is a tool, not a runtime, and the registry test
 // holds every launch by name to the runtimes' drivers.
 function gitAs(account, workspace, command = "git") {
-  return (args, { env = {}, input } = {}) => runProcess(
+  return (args, { env = {}, input, timeout = 120_000 } = {}) => runProcess(
     "/usr/sbin/runuser",
     cleanRuntimeArgs(account, workspace, command, args, [
       ...GIT_ISOLATION, "GIT_TERMINAL_PROMPT=0",
       ...Object.entries(env).map(([name, value]) => `${name}=${value}`),
     ]),
-    { cwd: workspace, input, timeout: 120_000 },
+    { cwd: workspace, input, timeout },
   );
 }
 
@@ -1135,6 +1136,101 @@ async function openChannel(socket, request, driver, surface, control = new Launc
   // The close handler owns the ticket from here.
   return { channelId, released: true };
   });
+}
+
+// An analyst's run (0147): read-only, on a snapshot of the workspace's last
+// commit, never the live tree — so it can run while the coder writes. The
+// snapshot is written in the workspace's turn as its owner (snapshot.mjs), into
+// a scratch directory under the gate root that is handed to the analyst's
+// runtime user and removed after. The run is held read-only by the kernel as an
+// orchestrator's turn is, calls no tool of the platform's, and its answer is
+// its final message. The job and its lease are the worker's, checked here.
+const CONSULT_TIMEOUT_MS = 15 * 60_000;
+async function runConsultBatch(request, driver, control = new LaunchControl()) {
+  const spec = surfaceOf(driver, "consult");
+  if (spec.transport !== "batch" || spec.workspace !== "snapshot") throw new Error(`${driver.name}'s consult surface is not a snapshot batch run`);
+  assertCapability(driver, spec.capability);
+  if (typeof request.worker_id !== "string" || !request.worker_id) throw new Error("a consultation names the worker that leases it");
+  if (typeof request.prompt !== "string" || request.prompt.length === 0 || request.prompt.length > 64 * 1024) {
+    throw new Error("consultation prompt length is invalid");
+  }
+  const context = await queryJson(`SELECT consultation_job_context(:'job_id'::bigint, :'worker_id')::text;`,
+    { job_id: request.job_id, worker_id: request.worker_id });
+  if (context.runtime_type !== driver.name) throw new Error(`consultation ${context.consultation_id} is ${context.runtime_type}'s, not ${driver.name}'s`);
+  const workspace = path.join(canonicalWorkspaceRoot, String(context.project_id));
+  if (path.resolve(String(context.workspace_path ?? "")) !== workspace) throw new Error("consultation workspace path does not match the project allocation");
+  if (!(await assertWorkspaceOnDisk(workspace))) throw new Error("the workspace is not on disk");
+  const account = adapterFor(driver.name).user;
+  const snapshotDir = path.join(canonicalGateWorkspaceRoot, `consult-${randomUUID()}`);
+  await mkdir(snapshotDir, { mode: 0o700 });
+  let leaf = null;
+  let child = null;
+  let stdout = "";
+  let stderr = "";
+  let outputExceeded = false;
+  let interrupted = false;
+  let timedOut = false;
+  let resolvedModel = null;
+  try {
+    const snapshot = await inWorkspaceTurn(workspace, async () => {
+      const owner = inspectOwner((await stat(workspace)).uid, runtimeUid);
+      return await buildSnapshot({ runGit: gitAs(owner, workspace), directory: snapshotDir });
+    });
+    if (!snapshot.head) throw new Error("the workspace has no commit to read");
+    transferOwnership(snapshotDir, account);
+    control.assertNotCancelled();
+    const args = cleanRuntimeArgs(account, snapshotDir, driver.executable, driver.run.argv({
+      model: driver.run.qualifyModel(context.provider_id ?? null, context.model),
+      prompt: request.prompt, surface: "consult", reasoningEffort: context.reasoning_effort ?? null,
+    }), driver.run.environment({ surface: "consult" }), { readOnlyWritable: driver.run.readOnlyWritable });
+    leaf = await isolation.create(`consult-${randomUUID()}`, runMemoryLimit(driver));
+    child = isolation.launch(leaf, "/usr/sbin/runuser", args, { cwd: snapshotDir, stdio: ["ignore", "pipe", "pipe"] });
+    const memory = watchMemory(leaf);
+    const terminate = (signal = "SIGTERM") => { isolation.signal(leaf, signal).catch(() => {}); };
+    control.bind(async () => { interrupted = true; await isolation.stop(leaf, { child }); });
+    const timer = setTimeout(() => { timedOut = true; terminate(); }, CONSULT_TIMEOUT_MS);
+    const collect = (target, chunk) => {
+      const next = target + chunk;
+      if (Buffer.byteLength(next) > 4 * 1024 * 1024) { outputExceeded = true; terminate(); }
+      return next;
+    };
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    let lineBuffer = "";
+    child.stdout.on("data", (chunk) => {
+      stdout = collect(stdout, chunk);
+      lineBuffer += chunk;
+      const lines = lineBuffer.split("\n");
+      lineBuffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const parsed = driver.stream.parse(line);
+        if (parsed) resolvedModel ??= driver.stream.resolvedModel?.(parsed.raw) ?? null;
+      }
+    });
+    child.stderr.on("data", (chunk) => (stderr = collect(stderr, chunk)));
+    const { exitCode, signal } = await new Promise((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", (exitCode, signal) => resolve({ exitCode, signal }));
+    });
+    clearTimeout(timer);
+    await memory?.stop().catch(() => null);
+    if (exitCode === READ_ONLY_LAUNCH_EXIT) throw new Error(`the read-only launch was refused: ${stderr.trim().split("\n").at(-1) ?? ""}`);
+    if (outputExceeded) throw new Error("the analyst's output exceeded 4 MiB");
+    if (timedOut) throw new Error(`the analyst ran past ${CONSULT_TIMEOUT_MS / 60_000} minutes and was ended`);
+    return {
+      exit_code: exitCode, signal, interrupted, response: driver.stream.answer(stdout),
+      failure: driver.stream.failure?.(stdout) ?? "", stderr: stderr.slice(-2000),
+      resolved_model: resolvedModel, snapshot_sha: snapshot.head, snapshot_skipped: snapshot.skipped.length,
+    };
+  } finally {
+    if (leaf) {
+      if (child) await isolation.stop(leaf, { child }).catch(() => {});
+      await isolation.release(leaf).catch((error) => {
+        process.stderr.write(`${JSON.stringify({ type: "run_cgroup.release_failed", cgroup: leaf.name, error: error.message })}\n`);
+      });
+    }
+    await rm(snapshotDir, { recursive: true, force: true }).catch(() => {});
+  }
 }
 
 // A batch run of a driver in a scratch gate workspace: the capability gate's
@@ -2555,6 +2651,14 @@ async function runReadOnlyBatch(request, driver, control = new LaunchControl()) 
           instructions: JSON.stringify(args.instructions), relevant_paths: JSON.stringify(args.relevant_paths),
         });
       }
+      if (toolRequest.type === "consult") {
+        if (typeof args.question !== "string" || args.question.trim().length < 10) throw new Error("consult needs a question");
+        return await queryJson(`SELECT invoke_consult(:'job_id'::bigint, :'worker_id', :'call_id', :'member', :'question')::text;`, {
+          job_id: request.job_id, worker_id: workerId, call_id: toolRequest.call_id,
+          member: typeof args.member === "string" ? args.member : "", question: args.question,
+        });
+      }
+      if (toolRequest.type !== "request_revision") throw new Error(`unsupported platform command: ${toolRequest.type}`);
       if (!strings(args.changes_required, { nonEmpty: true })) throw new Error("request_revision needs changes_required");
       return await queryJson(`SELECT invoke_request_revision(:'job_id'::bigint, :'worker_id', :'call_id',
         :'changes_required'::jsonb)::text;`, {
@@ -3024,6 +3128,7 @@ function runnerFor(request, driver) {
     return spec.grantMode === "read_only" ? runReadOnlyBatch : runFencedBatch;
   }
   if (request.type === "runtime_run" && spec.transport === "batch" && spec.workspace === "gate") return runGateBatch;
+  if (request.type === "runtime_run" && spec.transport === "batch" && spec.workspace === "snapshot") return runConsultBatch;
   throw Object.assign(
     new Error(`${driver.name}'s ${request.surface} surface is carried by ${spec.transport}, not by ${request.type}`),
     { code: "unsupported_surface", retryable: false },

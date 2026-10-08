@@ -692,6 +692,13 @@ INSERT INTO infra_web_allowlist(signature) VALUES
   -- (checked by the function). Recording a map and the orchestrator's read
   -- are the worker's, and not granted.
   ('get_repository_map(p_project_id uuid, p_owner_id uuid)'),
+  -- 0147: the Team tab's analysts, owner and team version checked by each
+  -- function. The orchestrator's and the consultation run's functions are the
+  -- worker's, and not granted.
+  ('project_analyst_list(p_project_id uuid, p_owner_id uuid)'),
+  ('add_project_analyst(p_project_id uuid, p_owner_id uuid, p_expected_version bigint, p_entry_id uuid, p_name text, p_instructions text, p_actor text, p_correlation_id text, p_reasoning_effort text)'),
+  ('update_project_analyst(p_project_id uuid, p_owner_id uuid, p_expected_version bigint, p_analyst_id uuid, p_name text, p_instructions text, p_actor text, p_correlation_id text)'),
+  ('remove_project_analyst(p_project_id uuid, p_owner_id uuid, p_expected_version bigint, p_analyst_id uuid, p_actor text, p_correlation_id text)'),
   -- 0088 (sprint C U1): read-only. The four readiness states of every
   -- assignment of a project, checking the owner itself; it reads
   -- provider_connections, which infra_web may not, so it is SECURITY DEFINER.

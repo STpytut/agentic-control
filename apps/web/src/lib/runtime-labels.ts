@@ -14,12 +14,12 @@ export const RUNTIME_LABELS: Readonly<Record<string, string>> = {
   claude: "Claude Code",
 };
 
-export type RuntimeRole = "orchestrator" | "executor";
+export type RuntimeRole = "orchestrator" | "executor" | "analyst";
 
 export const RUNTIME_ROLES: Readonly<Record<string, readonly RuntimeRole[]>> = {
   codex: ["orchestrator", "executor"],
-  opencode: ["orchestrator", "executor"],
-  claude: ["orchestrator", "executor"],
+  opencode: ["orchestrator", "executor", "analyst"],
+  claude: ["orchestrator", "executor", "analyst"],
 };
 
 export function runtimeLabel(value: string) {

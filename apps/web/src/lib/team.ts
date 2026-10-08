@@ -28,10 +28,16 @@ export type TeamReasoning = {
   members: Record<string, { level: string | null; supported: boolean }>;
   models: Record<string, { levels: ReasoningLevel[]; defaultLevel: string | null }>;
 };
+// A read-only member the orchestrator asks (Stage 12, 0147).
+export type TeamAnalyst = {
+  id: string; name: string; instructions: string; runtime: string; entryId: string;
+  modelId: string; displayName: string; modelStatus: string; reasoningEffort: string | null;
+};
+
 export type ProjectTeam = {
   projectId: string; managed: boolean; version: number;
   roles: TeamRole[]; runtimes: TeamRuntime[]; assignments: TeamAssignment[];
-  models: TeamModel[]; heldBack: TeamHeldBack[]; reasoning: TeamReasoning;
+  models: TeamModel[]; heldBack: TeamHeldBack[]; reasoning: TeamReasoning; analysts: TeamAnalyst[];
 };
 
 const strings = (value: unknown) => (Array.isArray(value) ? value.map(String) : []);
@@ -76,6 +82,11 @@ export function projectTeamFromRow(row: Json): ProjectTeam {
     })),
     heldBack: list("held_back").map((held) => ({ runtime: text(held.runtime), reason: text(held.reason), count: Number(held.count ?? 0) })),
     reasoning: teamReasoningFrom(row.reasoning),
+    analysts: list("analysts").map((analyst) => ({
+      id: text(analyst.id), name: text(analyst.name), instructions: text(analyst.instructions), runtime: text(analyst.runtime_type),
+      entryId: text(analyst.entry_id), modelId: text(analyst.model_id), displayName: text(analyst.display_name),
+      modelStatus: text(analyst.model_status), reasoningEffort: typeof analyst.reasoning_effort === "string" ? analyst.reasoning_effort : null,
+    })),
   };
 }
 

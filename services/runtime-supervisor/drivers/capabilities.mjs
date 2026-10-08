@@ -59,6 +59,9 @@ export const ROLE_CORE = Object.freeze({
     "sessions.create", "sessions.resume", "run.workspace_write", "stream.structured",
     "interrupt", "tools.worker_report", "events.raw",
   ]),
+  // Stage 12 (0147): reads a snapshot and answers once — no session to resume,
+  // no tool to call, nothing to write.
+  analyst: Object.freeze(["run.read_only", "stream.structured", "interrupt"]),
 });
 
 // Each problem as one sentence naming the driver and what it is missing, like

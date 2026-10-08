@@ -9,7 +9,7 @@ import type { ChatMessage as ChatMessageData } from "@/lib/product-data";
 const COLLAPSED_CHARACTERS = 1200;
 const COLLAPSED_LINES = 12;
 
-const ROLE_LABELS = { orchestrator: "orchestrator", reviewer: "reviewer", executor: "executor" } as const;
+const ROLE_LABELS = { orchestrator: "orchestrator", reviewer: "reviewer", executor: "executor", analyst: "analyst" } as const;
 
 export function ChatMessage({ message, timeLabel, modelLabel }: { message: ChatMessageData; timeLabel: string; modelLabel?: string }) {
   const collapsible = message.role === "user"

@@ -9,10 +9,15 @@ import { DeliveryOutcomeUnknown, startMailbox } from "../runtime-supervisor/run-
 import { launchProvenance } from "../runtime-supervisor/provenance.mjs";
 import { launchReasoningLevel } from "../runtime-supervisor/drivers/reasoning.mjs";
 import { runLeasedJob, runPollLoop, shutdownSignal } from "./worker-loop.mjs";
-import { describeOperatorChangeRequests, describeRepositoryContext, describeReviewEvidence, ORCHESTRATOR_INSTRUCTIONS, workflowUpdates } from "./turn-prompts.mjs";
+import { describeAnalysts, describeConsultationResult, describeOperatorChangeRequests, describeRepositoryContext, describeReviewEvidence, ORCHESTRATOR_INSTRUCTIONS, workflowUpdates } from "./turn-prompts.mjs";
+import { runConsultationWorker } from "./consultation-worker.mjs";
 
 // A review turn under either name until 11.2 N6 (migration 0073).
 const REVIEW_JOB_TYPES = new Set(["resume_orchestrator"]);
+// A resumed turn is a review when an implementation brought it; an analyst's
+// answer (0147) brings one too, and is not a review.
+const CONSULTATION_EVENTS = new Set(["consultation.answered", "consultation.failed"]);
+const isReviewJob = (job) => REVIEW_JOB_TYPES.has(job.job_type) && !CONSULTATION_EVENTS.has(job.payload?.event_type);
 const defaultWorkerId = `orchestrator-worker-${process.pid}`;
 
 function requireStringArray(value, name, { nonEmpty = false } = {}) {
@@ -65,6 +70,17 @@ async function invokePlatformTool(message, { driver, job, workerId, threadId, tu
           args.changes_required, "changes_required", { nonEmpty: true },
         )),
       },
+    );
+    return driver.toolBridge.answer(receipt);
+  }
+  if (params.tool === "consult") {
+    if (typeof args.question !== "string" || args.question.trim().length < 10) {
+      throw new Error("question must contain at least ten characters");
+    }
+    const receipt = await queryJson(
+      `SELECT invoke_consult(:'job_id'::bigint, :'worker_id', :'call_id', :'member', :'question')::text;`,
+      { job_id: job.id, worker_id: workerId, call_id: params.callId,
+        member: typeof args.member === "string" ? args.member : "", question: args.question },
     );
     return driver.toolBridge.answer(receipt);
   }
@@ -137,6 +153,7 @@ function developerInstructionsFor(context) {
     context.executor
       ? `Selected executor: ${context.executor.agent_name} (${context.executor.runtime_type}, ${context.executor.model}).`
       : "No enabled executor is assigned to this task.",
+    describeAnalysts(context.analysts),
   ].filter(Boolean).join("\n");
 }
 
@@ -157,7 +174,7 @@ async function turnPreamble(job, context, workerId) {
      ORDER BY e.conversation_sequence;`,
     { task_id: context.task_id },
   ));
-  const evidence = REVIEW_JOB_TYPES.has(job.job_type)
+  const evidence = isReviewJob(job)
     ? describeReviewEvidence(await queryJson(
       `SELECT deliver_review_evidence(:'job_id'::bigint, :'worker_id')::text;`,
       { job_id: job.id, worker_id: workerId },
@@ -246,6 +263,13 @@ async function executeJob(job, { workerId, lease }) {
     { job_id: job.id, worker_id: workerId },
   );
   if (!context?.content) throw new Error("orchestrator job has no message content");
+  // An analyst's answer is the turn's message, told as the analyst's reading.
+  if (CONSULTATION_EVENTS.has(job.payload?.event_type)) {
+    context.content = describeConsultationResult(job.payload.event_type, job.payload.event_payload);
+  }
+  // The analysts the orchestrator may ask, named in its instructions.
+  context.analysts = await queryJson(`SELECT orchestrator_analysts(:'job_id'::bigint, :'worker_id')::text;`,
+    { job_id: job.id, worker_id: workerId }).catch(() => []);
 
   // A read-only grant for this turn. Refused while a writer holds the
   // workspace, which the claim already avoided — but the writer may have taken
@@ -469,7 +493,13 @@ export function runOrchestratorWorker({ signal, once = false } = {}) {
 }
 
 async function main() {
-  await runOrchestratorWorker({ signal: shutdownSignal(), once: process.argv[2] === "once" });
+  const signal = shutdownSignal();
+  const once = process.argv[2] === "once";
+  const workerId = process.env.ORCHESTRATOR_WORKER_ID ?? defaultWorkerId;
+  await Promise.all([
+    runOrchestratorWorker({ signal, once }),
+    runConsultationWorker({ workerId: `${workerId}-consult`, signal, once }),
+  ]);
 }
 
 if (isMain(import.meta.url)) {
