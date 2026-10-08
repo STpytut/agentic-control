@@ -30,12 +30,15 @@ import { launchReasoningLevel } from "./reasoning.mjs";
 import { PLATFORM_COMMAND_TOOL_NAMES, WORKER_REPORT_TOOLS } from "./tool-contracts.mjs";
 import { sandboxShellEnvironment } from "../sandbox-shell.mjs";
 import { ANALYST_REPORT_SCHEMA, renderAnalystReport } from "../analyst-report.mjs";
+import { POLICY_TOOLS } from "../claude-hooks/policy.mjs";
 
 const adapter = adapterFor("claude");
 
 // The bridge of the release that launched the run, started by the Node that
 // runs the supervisor: neither is a path this file guesses on the host.
 const BRIDGE = fileURLToPath(new URL("../claude-mcp/platform-bridge.mjs", import.meta.url));
+// The platform's policy hook (rc.144), run by the same Node.
+const POLICY_HOOK = fileURLToPath(new URL("../claude-hooks/policy.mjs", import.meta.url));
 const MCP_SERVER = "platform";
 
 // Claude Code names an MCP tool `mcp__<server>__<tool>`.
@@ -45,6 +48,18 @@ const READ_TOOLS = "Read,Glob,Grep";
 // An executor's tools (Stage 12 X1): it reads, edits, writes and runs commands
 // in the workspace. Bash runs in the sandbox shell (environment below).
 const WRITE_TOOLS = "Read,Glob,Grep,Edit,Write,Bash";
+
+// An executor's settings (rc.144): the platform's PreToolUse policy on the
+// tools that run commands or write files, a deny the model reads as the tool's
+// error. Given on the command line, so it is the only hook a run has: a
+// repository's own settings are never read (`--setting-sources user`), and the
+// runtime's home is behind the permission rules. `--include-hook-events` puts
+// each refusal in the stream, where the activity feed shows it.
+function policySettings(node = process.execPath) {
+  const quote = (value) => `'${String(value).replace(/'/g, "'\\''")}'`;
+  return JSON.stringify({ hooks: { PreToolUse: [{ matcher: POLICY_TOOLS.join("|"),
+    hooks: [{ type: "command", command: `${quote(node)} ${quote(POLICY_HOOK)}`, timeout: 10 }] }] } });
+}
 
 function mcpConfig(node = process.execPath) {
   return JSON.stringify({ mcpServers: { [MCP_SERVER]: { type: "stdio", command: node, args: [BRIDGE] } } });
@@ -120,6 +135,7 @@ const SURFACE_ARGS = Object.freeze({
     "--disallowedTools", DENIED_READS,
     "--mcp-config", mcpConfig(),
     "--strict-mcp-config", "--permission-mode", "dontAsk",
+    "--settings", policySettings(), "--include-hook-events",
   ],
 });
 
@@ -328,7 +344,7 @@ export const claudeDriver = Object.freeze({
     // instead of failing runs once promoted. rc.142 added the last three.
     flags: Object.freeze(["--tools", "--allowedTools", "--disallowedTools", "--mcp-config", "--strict-mcp-config",
       "--permission-mode", "--setting-sources", "--session-id", "--resume", "--effort", "--output-format",
-      "--json-schema", "--fallback-model", "--no-session-persistence", "--append-system-prompt", "--agents"]),
+      "--json-schema", "--fallback-model", "--no-session-persistence", "--append-system-prompt", "--agents", "--settings", "--include-hook-events"]),
     // The catalog holds Claude Code's own names for its models.
     qualifyModel: (_provider, model) => model,
   }),
