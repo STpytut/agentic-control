@@ -28,7 +28,10 @@ const configuredRunTimeoutMs = Number(process.env.RUNTIME_RUN_TIMEOUT_MS ?? 60 *
 const supervisorRunCapMs = Number.isFinite(configuredRunTimeoutMs)
   ? Math.max(configuredRunTimeoutMs, 60_000)
   : 60 * 60_000;
-const runRequestTimeoutMs = supervisorRunCapMs + 2 * 60_000;
+// Plus the project's check, which the supervisor runs after the executor has
+// exited and before it answers (0143): up to 30 minutes of its own.
+const PROJECT_CHECK_CAP_MS = 30 * 60_000;
+const runRequestTimeoutMs = supervisorRunCapMs + PROJECT_CHECK_CAP_MS + 2 * 60_000;
 
 // The gate run is a capability smoke test and the supervisor caps it at five
 // minutes of its own, so this side waits that plus the same margin. It is a

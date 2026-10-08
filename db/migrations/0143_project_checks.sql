@@ -36,7 +36,7 @@ BEGIN
   END IF;
   BEGIN
     UPDATE projects SET check_command=v_command, check_timeout_seconds=COALESCE(p_timeout_seconds, check_timeout_seconds),
-      updated_at=clock_timestamp()
+      updated_at=clock_timestamp(), version=version+1
     WHERE id=p_project_id;
   EXCEPTION WHEN check_violation THEN
     PERFORM refuse('project_check_invalid', 'the check command is one line of at most 500 characters, and the timeout between 30 seconds and 30 minutes', '22023');

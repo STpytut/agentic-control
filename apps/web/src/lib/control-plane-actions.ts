@@ -779,9 +779,10 @@ export async function performControlPlaneAction(body: Record<string, unknown>, o
     const command = typeof body.command === "string" ? body.command.trim() : "";
     if (command.length > 500 || /[\r\n]/.test(command)) throw new Error("The check command is one line of at most 500 characters");
     const timeout = Number(body.timeoutSeconds);
+    if (!Number.isInteger(timeout)) throw new Error("timeoutSeconds is invalid");
     return executeJson(`SELECT set_project_check(:'project_id'::uuid,:'owner_id'::uuid,:'command',:'timeout'::integer)::text;`, {
       project_id: ownedProjectId, owner_id: operator.userId, command,
-      timeout: String(Number.isInteger(timeout) ? timeout : 600),
+      timeout: String(timeout),
     });
   }
   if (kind === "offsite_disable") {
