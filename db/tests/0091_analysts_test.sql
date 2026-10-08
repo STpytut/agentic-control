@@ -12,7 +12,8 @@
 --   * the run: claimed, its context read under the lease, finished with an
 --     answer (consultation.answered → resume_orchestrator) or a failure
 --     (consultation.failed → resume_orchestrator; the job ends, not a dead letter);
---   * a consultation turn does not move the task to reviewing.
+--   * a consultation turn does not move the task to reviewing;
+--   * rc.142 (0152): a member's token limit per run and fallback model.
 \set ON_ERROR_STOP on
 
 BEGIN;
@@ -264,9 +265,60 @@ BEGIN
     (SELECT id FROM consultations WHERE task_id=v_task AND status='answered' LIMIT 1)));
   IF v_reason IS DISTINCT FROM 'consultation_not_running' THEN RAISE EXCEPTION 'an answered question was stopped: %', v_reason; END IF;
 
+  -- rc.142 (0152): a token limit per run and a fallback model, per member.
+  INSERT INTO provider_connections(operator_id,provider,auth_method,status,billing_boundary,access_gateway,native_credential_reference)
+    VALUES(v_owner,'claude','native','connected','subscription','claude_subscription','claude-home:claude-worker') RETURNING id INTO v_claude_connection;
+  INSERT INTO provider_model_catalog(operator_id,connection_id,runtime_type,provider_id,model_id,discovery_source,status,last_verified_at,verification_id)
+    VALUES(v_owner,v_claude_connection,'claude','anthropic','sonnet','claude_aliases','verified',clock_timestamp(),gen_random_uuid()) RETURNING id INTO v_sonnet;
+  v_version := (SELECT version FROM project_runtime_defaults WHERE project_id=v_project);
+  v_reason := pg_temp.reason_of(format($q$SELECT set_project_member_run_settings(%L,%L,%s,%L,9999,NULL,'o','c')$q$,
+    v_project, v_owner, v_version, v_executor));
+  IF v_reason IS DISTINCT FROM 'run_limit_invalid' THEN RAISE EXCEPTION 'a limit under 10 000 was taken: %', v_reason; END IF;
+  v_reason := pg_temp.reason_of(format($q$SELECT set_project_member_run_settings(%L,%L,%s,%L,50000,%L,'o','c')$q$,
+    v_project, v_owner, v_version, v_executor, v_sonnet));
+  IF v_reason IS DISTINCT FROM 'fallback_model_unavailable' THEN RAISE EXCEPTION 'an OpenCode executor got a Claude fallback: %', v_reason; END IF;
+  v_reason := pg_temp.reason_of(format($q$SELECT set_project_member_run_settings(%L,%L,%s,%L,50000,NULL,'o','c')$q$,
+    v_project, v_owner, v_version, v_orchestrator));
+  IF v_reason IS DISTINCT FROM 'team_member_unavailable' THEN RAISE EXCEPTION 'the orchestrator got run settings: %', v_reason; END IF;
+  PERFORM set_project_member_run_settings(v_project, v_owner, v_version, v_executor, 250000, NULL, 'o', 'c');
+  IF (executor_run_settings(v_executor)->>'run_token_limit')::bigint IS DISTINCT FROM 250000
+     OR executor_run_settings(v_executor)->>'fallback_model' IS NOT NULL
+     OR (project_member_run_settings(v_project, v_owner)#>>ARRAY[v_executor::text,'run_token_limit'])::bigint IS DISTINCT FROM 250000 THEN
+    RAISE EXCEPTION 'the executor''s limit: %', project_member_run_settings(v_project, v_owner);
+  END IF;
+  -- A Claude Code analyst takes a fallback; a fallback no longer verified is not passed.
+  v_result := add_project_analyst(v_project, v_owner, (SELECT version FROM project_runtime_defaults WHERE project_id=v_project), v_sonnet, 'Claude reader', '', 'o', 'c');
+  INSERT INTO provider_model_catalog(operator_id,connection_id,runtime_type,provider_id,model_id,discovery_source,status,last_verified_at,verification_id)
+    VALUES(v_owner,v_claude_connection,'claude','anthropic','haiku','claude_aliases','verified',clock_timestamp(),gen_random_uuid()) RETURNING id INTO v_codex_a;
+  PERFORM set_project_member_run_settings(v_project, v_owner, (SELECT version FROM project_runtime_defaults WHERE project_id=v_project),
+    (v_result->>'analyst_id')::uuid, NULL, v_codex_a, 'o', 'c');
+  IF project_member_run_settings(v_project, v_owner)#>>ARRAY[v_result->>'analyst_id','fallback_model'] IS DISTINCT FROM 'haiku'
+     OR project_member_run_settings(v_project, v_owner)#>>ARRAY[v_result->>'analyst_id','run_token_limit'] IS NOT NULL THEN
+    RAISE EXCEPTION 'the analyst''s fallback: %', project_member_run_settings(v_project, v_owner);
+  END IF;
+  UPDATE provider_model_catalog SET status='unavailable', verification_id=NULL WHERE id=v_codex_a;
+  IF project_member_run_settings(v_project, v_owner)#>>ARRAY[v_result->>'analyst_id','fallback_model'] IS NOT NULL THEN
+    RAISE EXCEPTION 'a fallback no longer verified is still passed';
+  END IF;
+  -- The model that answered names the run's usage.
+  SET LOCAL session_replication_role = replica;
+  INSERT INTO domain_events(event_type,project_id,task_id,conversation_id,conversation_sequence,actor_type,actor_id,correlation_id,aggregate_type,aggregate_id,aggregate_version,payload)
+    VALUES('consultation.requested',v_project,v_task,(SELECT conversation_id FROM tasks WHERE id=v_task),9300,'agent','orchestrator','consult-test',
+      'consultation',gen_random_uuid(),1,'{}') RETURNING id INTO v_event;
+  INSERT INTO runtime_jobs(source_event_id,job_type,project_id,task_id,status,leased_by,leased_until,payload)
+    VALUES(v_event,'consultation_run',v_project,v_task,'in_flight','fallback-worker',clock_timestamp()+interval '5 minutes','{}')
+    RETURNING * INTO v_run_job;
+  SET LOCAL session_replication_role = origin;
+  PERFORM append_runtime_activity_event(v_run_job.id, 'fallback-worker', 'claude', 'runtime.model.fallback', 'running',
+    'switched', '{"model":"claude-haiku-5-5","from":"claude-opus-5-5"}'::jsonb);
+  IF (SELECT model FROM run_usage WHERE job_id=v_run_job.id) IS DISTINCT FROM 'claude-haiku-5-5' THEN
+    RAISE EXCEPTION 'the fallback model was not recorded: %', (SELECT to_jsonb(u) FROM run_usage u WHERE job_id=v_run_job.id);
+  END IF;
+
   -- Removing the analyst: it is no longer asked.
   v_version := (remove_project_analyst(v_project, v_owner, (SELECT version FROM project_runtime_defaults WHERE project_id=v_project), v_analyst, 'o', 'c')->>'version')::bigint;
-  IF jsonb_array_length(project_analyst_list(v_project, v_owner)) <> 0 THEN RAISE EXCEPTION 'a removed analyst is listed'; END IF;
+  IF jsonb_array_length(project_analyst_list(v_project, v_owner)) <> 1
+     OR project_analyst_list(v_project, v_owner)->0->>'name' <> 'Claude reader' THEN RAISE EXCEPTION 'a removed analyst is listed'; END IF;
   RAISE NOTICE 'analyst assertions passed';
 END $$;
 

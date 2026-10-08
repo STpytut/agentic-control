@@ -704,6 +704,10 @@ INSERT INTO infra_web_allowlist(signature) VALUES
   ('set_project_member_subagents(p_project_id uuid, p_owner_id uuid, p_expected_version bigint, p_member_id uuid, p_enabled boolean, p_actor text, p_correlation_id text)'),
   ('project_member_subagents(p_project_id uuid, p_owner_id uuid)'),
   ('request_consultation_stop(p_project_id uuid, p_owner_id uuid, p_consultation_id uuid, p_actor text)'),
+  -- 0152 (rc.142): a member's token limit per run and fallback model, read
+  -- and set on the Team page; each checks the owner itself.
+  ('set_project_member_run_settings(p_project_id uuid, p_owner_id uuid, p_expected_version bigint, p_member_id uuid, p_token_limit bigint, p_fallback_entry_id uuid, p_actor text, p_correlation_id text)'),
+  ('project_member_run_settings(p_project_id uuid, p_owner_id uuid)'),
   -- 0088 (sprint C U1): read-only. The four readiness states of every
   -- assignment of a project, checking the owner itself; it reads
   -- provider_connections, which infra_web may not, so it is SECURITY DEFINER.

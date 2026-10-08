@@ -165,9 +165,15 @@ function configKeys(name, adapter, prepared, probe, started, version = null) {
     const answer = probe(["update"]);
     const text = `${answer.stdout}\n${answer.stderr}`;
     const refused = /disabled/i.test(text);
-    return ["config.keys", refused ? "passed" : "failed", {
+    if (!refused) return ["config.keys", "failed", {
+      failureClass: "runtime", started, detail: `\`claude update\` was not refused: ${text.trim().split("\n")[0].slice(0, 200)}`,
+    }];
+    // rc.142: every flag the driver's launches pass is still offered.
+    const missing = missingFlags(driverFor("claude").run.flags ?? [], probe(["--help"]));
+    return ["config.keys", missing.length ? "failed" : "passed", {
       failureClass: "runtime", started,
-      detail: refused ? "`claude update` refused with the adapter's switches" : `\`claude update\` was not refused: ${text.trim().split("\n")[0].slice(0, 200)}`,
+      detail: missing.length ? `\`claude --help\` no longer lists ${missing.join(", ")}`
+        : "`claude update` refused with the adapter's switches; every flag the driver passes is listed",
     }];
   }
   // OpenCode: its update runs only from the TUI, which is never launched; the
@@ -177,6 +183,12 @@ function configKeys(name, adapter, prepared, probe, started, version = null) {
     started,
     detail: `${adapter.autoUpdate.setting} is passed on every launch; the executable tree is root-owned and its digest recorded`,
   }];
+}
+
+// The flags a `--help` does not list, matched as whole flags.
+export function missingFlags(flags, help) {
+  const text = `${help?.stdout ?? ""}\n${help?.stderr ?? ""}`;
+  return flags.filter((flag) => !new RegExp(`(^|[\\s,])${flag.replace(/[-]/g, "\\-")}(?=[\\s,=<]|$)`, "m").test(text));
 }
 
 function answerOf(driver, result) {

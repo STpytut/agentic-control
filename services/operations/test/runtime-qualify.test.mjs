@@ -461,3 +461,15 @@ test("a model list refused for want of memory leaves the qualification incomplet
   });
   assert.deepEqual(recorded["catalog.list"], { result: "inconclusive", failureClass: "infrastructure" });
 });
+
+// rc.142: a candidate must still offer every flag the Claude Code driver passes.
+test("a flag a candidate's --help no longer lists fails config.keys", async () => {
+  const { missingFlags } = await import("../runtime-qualify-turns.mjs");
+  const { driverFor } = await import("../../runtime-supervisor/drivers/index.mjs");
+  const flags = driverFor("claude").run.flags;
+  for (const flag of ["--json-schema", "--fallback-model", "--no-session-persistence"]) assert.ok(flags.includes(flag), flag);
+  const help = { stdout: flags.map((flag) => `  ${flag} <value>  what it does`).join("\n") };
+  assert.deepEqual(missingFlags(flags, help), []);
+  const without = { stdout: help.stdout.replace("--fallback-model <value>", "--fallback-models <value>") };
+  assert.deepEqual(missingFlags(flags, without), ["--fallback-model"], "a renamed flag is not taken for the old one");
+});

@@ -16,7 +16,7 @@ import { claudeRateLimits, claudeTokens, codexRateLimits, codexTokens, costUsd, 
 // from named, bounded fields — never passed through.
 const allowedDetails = new Set([
   "reason", "status", "tool", "item_type", "tokens", "cost", "characters", "error",
-  "cost_basis", "thread_total", "rate_limits",
+  "cost_basis", "thread_total", "rate_limits", "model", "from",
 ]);
 
 // What a tool said when it failed. OpenCode puts it in different places
@@ -76,6 +76,16 @@ export function normalizeClaudeEvent(event) {
   if (!event || typeof event !== "object" || Array.isArray(event)) return null;
   if (event.type === "system" && event.subtype === "init") return {
     eventType: "runtime.turn.started", phase: "running_turn", summary: "Claude Code started the turn", details: {},
+  };
+  // rc.142: the member's model was overloaded or not available and the run
+  // went on with its fallback (`--fallback-model`); 2.1.294 says so with
+  // `system`/`model_fallback`, naming both. The usage row takes the model that
+  // answered (0152).
+  if (event.type === "system" && event.subtype === "model_fallback" && typeof event.fallback_model === "string") return {
+    eventType: "runtime.model.fallback", phase: "running_turn",
+    summary: `Claude Code switched to ${event.fallback_model.slice(0, 80)}: ${String(event.original_model ?? "its model").slice(0, 80)} was ${event.trigger === "model_not_found" ? "not available" : "overloaded"}`,
+    details: cleanDetails({ model: event.fallback_model, from: typeof event.original_model === "string" ? event.original_model : undefined,
+      reason: typeof event.trigger === "string" ? event.trigger : undefined }),
   };
   const blocks = Array.isArray(event.message?.content) ? event.message.content : [];
   if (event.type === "assistant") {
