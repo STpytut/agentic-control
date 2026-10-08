@@ -601,12 +601,14 @@ async function reviewEvidenceAs(account, workspace, base) {
 // own test run had, minus the network (project-check.mjs).
 // It runs in the run's own cgroup leaf, so the run's memory limit bounds it as
 // it bounded the executor; the leaf is released after it, with the rest.
-async function projectCheckAs(account, adapter, workspace, check, leaf) {
+// `command`, not a literal, as in gitAs: the sandbox shell is a tool, not a
+// runtime, and the registry test holds every runtime launch to its driver.
+async function projectCheckAs(account, adapter, workspace, check, leaf, command = SANDBOX_SHELL) {
   return await runProjectCheck({
     command: check.command, timeoutSeconds: Number(check.timeout_seconds) || 600,
     spawnCheck: async (args, { timeout }) => {
       const [launcher, argv] = isolation.launcher(leaf, "/usr/sbin/runuser",
-        cleanRuntimeArgs(account, workspace, SANDBOX_SHELL, args,
+        cleanRuntimeArgs(account, workspace, command, args,
           [...sandboxShellEnvironment(adapter), "INFRA_COD_SANDBOX_NO_NET=1", "CI=1"]));
       const result = await runProcess(launcher, argv, { cwd: workspace, timeout, maxBytes: 8 * 1024 * 1024 });
       return { code: result.code, stdout: result.stdout.toString("utf8"), stderr: result.stderr };
