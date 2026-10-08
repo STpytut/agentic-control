@@ -716,6 +716,20 @@ journalctl -u infra-cod-offsite-backup.service
 sudo node /opt/infra-cod/current/services/operations/offsite-backup.mjs list
 ```
 
+## 16c. Platform-run checks (0143, rc.131)
+
+A project's owner names a check command in **Project settings → Workspace**
+(`npm test`, `pytest`, …). After every implementation or revision, while the
+run still holds the workspace, the supervisor runs it — as the account that
+ran the executor, in that runtime's sandbox shell (bubblewrap, its login
+covered, its own PID namespace) and with `--unshare-net` — bounded by the
+project's timeout (30 s to 30 min). The outcome, with the end of what it
+printed, is a platform-verified check (`project_checks`) in the review
+evidence: the reviewer reads it as a fact, and `prepare_publish` refuses
+evidence whose platform checks did not all pass, so failing checks block the
+pull request. The command is the owner's alone; an executor cannot change what
+checks its own work.
+
 ## 17. Model catalog, capability gate and runtime selection (7.1D)
 
 Sprint 7.1D is implemented on branch `codex/sprint-7.1-finish`; the planned

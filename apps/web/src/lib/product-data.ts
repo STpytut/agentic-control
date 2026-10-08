@@ -25,6 +25,9 @@ export type ProjectSummary = {
   attentionCount: number;
   updatedAt: string;
   version: number;
+  /** The owner's check command, run by the platform after each implementation (0143); "" when none. */
+  checkCommand: string;
+  checkTimeoutSeconds: number;
 };
 
 export type RuntimeChoice = {
@@ -276,6 +279,8 @@ const demoProject: ProjectSummary = {
   attentionCount: 0,
   updatedAt: new Date().toISOString(),
   version: 1,
+  checkCommand: "",
+  checkTimeoutSeconds: 600,
 };
 
 function projectFromRow(row: Json): ProjectSummary {
@@ -298,6 +303,8 @@ function projectFromRow(row: Json): ProjectSummary {
     attentionCount: Number(row.attention_count ?? 0),
     updatedAt: String(row.updated_at),
     version: Number(row.version ?? 1),
+    checkCommand: typeof row.check_command === "string" ? row.check_command : "",
+    checkTimeoutSeconds: Number(row.check_timeout_seconds ?? 600),
   };
 }
 
@@ -670,6 +677,7 @@ export async function getProjectWorkspace(ownerId: string, projectId: string, re
       'repository_url',p.repository_url,'workspace_path',p.workspace_path,
       'default_branch',p.default_branch,'settings',p.settings,'updated_at',p.updated_at,
       'version',p.version,'credential_mode',p.credential_mode,
+      'check_command',p.check_command,'check_timeout_seconds',p.check_timeout_seconds,
       'task_count',(SELECT count(*) FROM tasks t WHERE t.project_id=p.id),
       'attention_count',(SELECT count(*) FROM tasks t WHERE t.project_id=p.id AND t.status='needs_attention')
     )::text FROM projects p WHERE p.id=:'project_id'::uuid

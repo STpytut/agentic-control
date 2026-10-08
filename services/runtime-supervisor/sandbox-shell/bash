@@ -53,4 +53,8 @@ if [ -n "${INFRA_COD_KEPT_STATE:-}" ]; then
     [ -d "$target" ] && cover+=(--bind "$target" "$target")
   done
 fi
-exec /usr/bin/bwrap --dev-bind / / "${cover[@]}" --unshare-pid --proc /proc --die-with-parent -- /bin/bash "$@"
+# INFRA_COD_SANDBOX_NO_NET=1: its own empty network namespace as well — the
+# platform's run of a project's check (project-check.mjs, 0143) has no network.
+net=()
+[ "${INFRA_COD_SANDBOX_NO_NET:-}" = "1" ] && net=(--unshare-net)
+exec /usr/bin/bwrap --dev-bind / / "${cover[@]}" "${net[@]}" --unshare-pid --proc /proc --die-with-parent -- /bin/bash "$@"

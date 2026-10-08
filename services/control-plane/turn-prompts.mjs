@@ -185,7 +185,12 @@ export function describeReviewEvidence(evidence) {
     `- executor-reported checks (the executor's own claim; the platform did not run them): ${JSON.stringify(evidence.executor_reported_checks ?? {})}`,
     "- platform-verified checks (run by the control plane itself):",
     ...(Array.isArray(evidence.platform_verified_checks) ? evidence.platform_verified_checks : [])
-      .map((check) => `  ${check.name}: ${check.status} — ${check.detail}`),
+      .flatMap((check) => [
+        `  ${check.name}: ${check.status} — ${check.detail}`,
+        // The project's own check (0143) carries the end of what it printed:
+        // the failing test is in it, and the reviewer should not have to guess.
+        ...(check.output ? [`  output (last lines):`, ...String(check.output).split("\n").slice(-40).map((line) => `    ${line}`)] : []),
+      ]),
     truncation.diff_truncated
       ? `- diff: the first ${truncation.diff_bytes} of ${truncation.patch_bytes} bytes; read the rest in the workspace`
       : `- diff (${truncation.patch_bytes ?? 0} bytes, complete):`,
