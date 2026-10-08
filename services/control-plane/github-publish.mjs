@@ -139,6 +139,21 @@ function summaryText(summary) {
   return "";
 }
 
+// A pull request's title: what the work is, in the orchestrator's words when it
+// delegated — its handoff's objective, first sentence, at most 72 characters on
+// a word — and the task's own title otherwise. The task's title is the
+// operator's first message cut short, and focus-timer#11 was titled "First ask
+// the analyst (Code reader) to find where and how the session history…".
+export function pullRequestTitle(intent, objective) {
+  const sentence = String(objective ?? "").replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s/)[0].replace(/[.!]$/, "");
+  if (sentence.length >= 8) {
+    if (sentence.length <= 72) return sentence;
+    const cut = sentence.slice(0, 71);
+    return `${cut.slice(0, cut.lastIndexOf(" ") > 40 ? cut.lastIndexOf(" ") : 71)}…`;
+  }
+  return String(intent.title ?? "").trim() || "Changes from infra-cod";
+}
+
 export function pullRequestBody(intent) {
   const criteria = Array.isArray(intent.acceptance_criteria) ? intent.acceptance_criteria : [];
   const summary = summaryText(intent.summary).trim();

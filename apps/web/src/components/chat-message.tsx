@@ -12,6 +12,20 @@ const COLLAPSED_LINES = 12;
 
 const ROLE_LABELS = { orchestrator: "orchestrator", reviewer: "reviewer", executor: "executor", analyst: "analyst" } as const;
 
+// The part an agent plays, as a chip of its own colour beside its name: who
+// plans, who reviews, who writes and who reads, before a word is read. Colours
+// of their own, not the status tones — a reviewer is not a warning. Tinted
+// from the colour, so they hold in light and dark.
+const ROLE_COLORS: Record<keyof typeof ROLE_LABELS, string> = {
+  orchestrator: "#5B5BD6", reviewer: "#8E4EC6", executor: "#12A594", analyst: "#D9822B",
+};
+
+function RoleChip({ role }: { role: keyof typeof ROLE_LABELS }) {
+  const color = ROLE_COLORS[role];
+  return <span className="type-meta inline-flex items-center rounded-sm px-1.5 py-px font-medium leading-5"
+    style={{ color, background: `color-mix(in srgb, ${color} 14%, transparent)` }}>{ROLE_LABELS[role]}</span>;
+}
+
 export function ChatMessage({ message, timeLabel, modelLabel }: { message: ChatMessageData; timeLabel: string; modelLabel?: string }) {
   const collapsible = message.role === "user"
     && (message.content.length > COLLAPSED_CHARACTERS || message.content.split("\n").length > COLLAPSED_LINES);
@@ -48,12 +62,12 @@ export function ChatMessage({ message, timeLabel, modelLabel }: { message: ChatM
     </article>;
   }
 
-  const detail = [message.actorRole && ROLE_LABELS[message.actorRole], modelLabel].filter(Boolean).join(" · ");
+  const detail = modelLabel ?? "";
 
   return <article className="mb-6 grid grid-cols-[32px_minmax(0,1fr)] gap-3">
     <RuntimeMark runtime={message.runtime} fallback={message.author}/>
     <div className="min-w-0">
-      <header className="flex min-h-6 flex-wrap items-center gap-x-2"><strong className="type-meta font-medium">{message.author}</strong>{detail && <span className="type-meta text-muted">{detail}</span>}<time className="type-meta text-muted">{timeLabel}</time></header>
+      <header className="flex min-h-6 flex-wrap items-center gap-x-2"><strong className="type-meta font-medium">{message.author}</strong>{message.actorRole && <RoleChip role={message.actorRole}/>}{detail && <span className="type-meta text-muted">{detail}</span>}<time className="type-meta text-muted">{timeLabel}</time></header>
       <div className="message-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown></div>
     </div>
   </article>;
