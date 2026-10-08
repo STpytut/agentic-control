@@ -1,5 +1,10 @@
 # Spec Changelog
 
+## 2026-10-08 — a repository map for the orchestrator (rc.134)
+
+- **Every new chat starts with a project briefing** (migration 0146). The supervisor builds a map of the workspace's last commit — layout, languages, manifests and their scripts, the start of the README, the instruction files it holds, the latest commits — as the workspace's owner, after every implementation, sync with GitHub and provisioning. A new orchestrator session is told it in its first turn, with the project's check command and what the earlier tasks changed and which pull requests they became. Repository text is fenced as data; `.env` files, binaries and files over 256 KiB are never read.
+- **The Workspace page shows the map** the orchestrator is given, and when it was built.
+
 ## 2026-10-07 — notifications, approve & open PR, an unread list keeps its models (rc.127–rc.128)
 
 - **Telegram notifications** (migration 0140). The operator's own bot sends a message when a task needs their approval, an agent asks a question, a job stops for good, a pull request opens, or a publish fails. The bot token is stored only as the broker envelope the browser made; a new service, `infra-cod-telegram-notifier`, decrypts it on the VPS.

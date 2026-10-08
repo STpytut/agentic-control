@@ -35,6 +35,7 @@ import { createWorkspaceSerializer, resolveWorkspaceGrant } from "./workspace-gr
 import { createDeprovisionDeadline, createProjectSingleFlight } from "./deprovision-bound.mjs";
 import { githubWorkspaceAction, isPublishAction, isSyncAction } from "./github-workspace-protocol.mjs";
 import { applyWorkspaceSync } from "./workspace-sync.mjs";
+import { buildRepositoryMap } from "./repository-map.mjs";
 import { exportApprovedCommit } from "./publish-export.mjs";
 import { startMailbox } from "./run-mailbox.mjs";
 import { ensureRunToolRoot, openRunToolSocket, sweepRunToolSockets } from "./worker-tool-socket.mjs";
@@ -477,6 +478,7 @@ async function githubWorkspaceSync(request, action) {
       await chmod(scratch, 0o700);
       const result = await applyWorkspaceSync({ runGit: gitAs(owner, workspace), bundlePath: readable,
         baseBranch: target.base_branch, mode: target.mode });
+      if (result.status !== "failed") await refreshRepositoryMap(target.project_id, owner, workspace, "sync");
       process.stderr.write(`${JSON.stringify({ type: "workspace.synced", sync_id: request.sync_id, project_id: target.project_id, status: result.status, outcome: result.outcome })}\n`);
       return await finish(result);
     } finally {
@@ -662,6 +664,24 @@ function gitAs(account, workspace, command = "git") {
   );
 }
 
+// The project's repository map (0146), built from the workspace's last commit
+// as the account that owns it — never as root, for the reason gitAs gives — and
+// recorded for the orchestrator's next session. Never required: a map that
+// could not be built leaves the last one in place, and the work that called
+// this goes on (repository-map.mjs).
+async function refreshRepositoryMap(projectId, account, workspace, source) {
+  try {
+    const map = await buildRepositoryMap({ runGit: gitAs(account, workspace) });
+    if (!map) return;
+    const serialized = JSON.stringify(map);
+    if (!serialized.isWellFormed()) throw new Error("the map is not well-formed Unicode");
+    await queryJson(`SELECT record_repository_map(:'project_id'::uuid,:'source',:'map'::jsonb)::text;`,
+      { project_id: projectId, source, map: serialized });
+  } catch (error) {
+    process.stderr.write(`${JSON.stringify({ type: "repository_map.failed", project_id: projectId, source, error: String(error?.message ?? error).slice(0, 300) })}\n`);
+  }
+}
+
 // The four digests of a workspace as `account` sees it, relative to `base`.
 // The scratch index lives in a directory made for this call and given to that
 // account, not in the repository: the repository's index is the runtime's.
@@ -745,6 +765,7 @@ async function provisionWorkspace(operation) {
   // below is recursive and privileged.
   await assertWorkspaceOnDisk(plan.workspace);
   transferOwnership(plan.workspace, plan.ownership.user);
+  await refreshRepositoryMap(operation.project_id, plan.ownership.user, plan.workspace, "provision");
   return {
     owner: plan.ownership.user,
     workspace: plan.workspace,
@@ -2359,6 +2380,9 @@ async function runFencedBatch(request, driver, control = new LaunchControl()) {
             fencing_token: request.fencing_token, evidence: JSON.stringify(evidence),
           },
         );
+        // The map follows the implementation, taken while the run still holds
+        // the workspace, so the next chat starts from what this one made.
+        await refreshRepositoryMap(context.project_id, evidenceAccount, context.workspace, "implementation");
         completionResult = await queryJson(
           `SELECT finalize_worker_completion(:'report_id'::uuid, :'job_id'::bigint, :'supervisor_id')::text;`,
           { report_id: completionReport.report_id, job_id: request.job_id, supervisor_id: supervisorId },
