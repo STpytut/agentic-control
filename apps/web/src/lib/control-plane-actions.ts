@@ -785,6 +785,14 @@ export async function performControlPlaneAction(body: Record<string, unknown>, o
       timeout: String(timeout),
     });
   }
+  // 0145: bring the workspace up to date with GitHub now, or reset it to
+  // GitHub after a sync said they diverged (local commits go to a backup
+  // branch). Owner-only, checked by the function.
+  if (kind === "workspace_sync") {
+    const mode = body.mode === "reset" ? "reset" : "sync";
+    return executeJson(`SELECT request_workspace_sync(:'project_id'::uuid,:'owner_id'::uuid,:'mode')::text;`,
+      { project_id: ownedProjectId, owner_id: operator.userId, mode });
+  }
   if (kind === "offsite_disable") {
     return executeJson(`SELECT disable_offsite_backup(:'owner_id'::uuid)::text;`, { owner_id: operator.userId });
   }

@@ -360,6 +360,10 @@
     "0144_notify_after_review.sql": {
       "previousReleaseCompatible": true,
       "note": "Recreates the approval-notification trigger with a narrower WHEN (reviewing to awaiting_review); no table, column or function changes."
+    },
+    "0145_workspace_sync.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds workspace_syncs, its functions and an AFTER INSERT trigger on tasks that only queues a sync; the previous release neither claims nor reads syncs, so queued ones wait."
     }
   }
 }
