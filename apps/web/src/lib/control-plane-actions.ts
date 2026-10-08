@@ -772,6 +772,19 @@ export async function performControlPlaneAction(body: Record<string, unknown>, o
       envelope: JSON.stringify({ ciphertext: b64(body.ciphertext, "ciphertext"), iv: b64(body.iv, "iv"), tag: b64(body.tag, "tag"), key_wrap: b64(body.keyWrap, "keyWrap") }),
     });
   }
+  // 0143: the project's check command, run by the platform after each
+  // implementation. Owner-only, checked by the function; an empty command
+  // turns the check off.
+  if (kind === "project_check_set") {
+    const command = typeof body.command === "string" ? body.command.trim() : "";
+    if (command.length > 500 || /[\r\n]/.test(command)) throw new Error("The check command is one line of at most 500 characters");
+    const timeout = Number(body.timeoutSeconds);
+    if (!Number.isInteger(timeout)) throw new Error("timeoutSeconds is invalid");
+    return executeJson(`SELECT set_project_check(:'project_id'::uuid,:'owner_id'::uuid,:'command',:'timeout'::integer)::text;`, {
+      project_id: ownedProjectId, owner_id: operator.userId, command,
+      timeout: String(timeout),
+    });
+  }
   if (kind === "offsite_disable") {
     return executeJson(`SELECT disable_offsite_backup(:'owner_id'::uuid)::text;`, { owner_id: operator.userId });
   }

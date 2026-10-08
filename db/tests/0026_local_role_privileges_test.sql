@@ -680,6 +680,9 @@ INSERT INTO infra_web_allowlist(signature) VALUES
   ('set_offsite_backup(p_owner_id uuid, p_endpoint text, p_bucket text, p_access_key_id text, p_envelope jsonb)'),
   ('get_offsite_backup(p_owner_id uuid)'),
   ('disable_offsite_backup(p_owner_id uuid)'),
+  -- 0143: the project's check command, owner-only (checked by the function).
+  -- What the supervisor reads per run is not granted.
+  ('set_project_check(p_project_id uuid, p_owner_id uuid, p_command text, p_timeout_seconds integer)'),
   -- 0088 (sprint C U1): read-only. The four readiness states of every
   -- assignment of a project, checking the owner itself; it reads
   -- provider_connections, which infra_web may not, so it is SECURITY DEFINER.

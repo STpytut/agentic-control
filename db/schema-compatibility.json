@@ -352,6 +352,10 @@
     "0142_telegram_decisions.sql": {
       "previousReleaseCompatible": true,
       "note": "Adds telegram_decisions, a nullable outbox column, telegram_decide, and replaces notify_task_awaiting_approval and claim_notifications under their signatures with supersets of what they returned; the previous release reads none of it differently."
+    },
+    "0143_project_checks.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds projects.check_command (nullable) and check_timeout_seconds (defaulted), set_project_check and project_check_for_run; the previous release never sets or reads them."
     }
   }
 }

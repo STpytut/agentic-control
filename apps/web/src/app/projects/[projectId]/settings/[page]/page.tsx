@@ -10,6 +10,7 @@ import { AssignmentReadinessCard } from "@/components/assignment-readiness";
 import { ProjectTeamTab } from "@/components/project-team";
 import { ChangedFilesCard, HandoffCard, UnpublishedCommitsCard, WorkspaceCleanBadge, WorkspaceLockCard, WorkspaceMetrics } from "@/components/workspace-state";
 import { IssueIntakeSettings } from "@/components/issue-intake";
+import { ProjectCheckCard } from "@/components/project-check-card";
 import { Notice } from "@/components/ui/notice";
 import { statusTone } from "@/components/ui/status-tone";
 import { getProjectDeletionState, getProjectReadiness, getProjectRuntimeDefaults, getProjectTeam, getProjectWorkspace, getRuntimeCatalog , getIssueIntake } from "@/lib/product-data";
@@ -108,6 +109,7 @@ export default async function ProjectSettingsPage({ params, searchParams }: { pa
         {current === "workspace" && <>
           <SettingsPageHeader title="Workspace" description="The repository as the host sees it: Git state, executor checks and single-writer ownership." action={<WorkspaceCleanBadge state={workspace.workspaceState}/>}/>
           <div className="grid gap-3">
+            <ProjectCheckCard projectId={project.id} command={project.checkCommand} timeoutSeconds={project.checkTimeoutSeconds}/>
             <WorkspaceMetrics state={workspace.workspaceState}/>
             <WorkspaceLockCard state={workspace.workspaceState} projectId={project.id} writeEnabled/>
             <UnpublishedCommitsCard state={workspace.workspaceState}/>

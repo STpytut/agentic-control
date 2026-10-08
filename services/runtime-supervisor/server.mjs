@@ -20,6 +20,8 @@ import { assertNoLiveWriters, parseProcessRef, writerAlive } from "../control-pl
 import { checkClaudeModels } from "./claude-model-list.mjs";
 import { provisionPlan, inspectPlan, inspectOwner, summariseWorkspace, ownershipFor, homeFor, assertWorkspaceOnDisk, GIT_ISOLATION, commitIdentityEnvironment, summariseUnpublished, EMPTY_TREE } from "./workspace-provisioning.mjs";
 import { collectReviewEvidence, headCommit, observationOf, runProcess, stashLeftovers } from "./review-evidence.mjs";
+import { runProjectCheck } from "./project-check.mjs";
+import { SANDBOX_SHELL, sandboxShellEnvironment } from "./sandbox-shell.mjs";
 import { assertTrustedDirectoryChain } from "./trusted-directory.mjs";
 import { WORKSPACE_RESTING_RUNTIME, adapterFor, allAdapters } from "../operations/runtime-adapters.mjs";
 import { activeQualification, assertCapability, capabilityVerification } from "./drivers/capabilities.mjs";
@@ -592,6 +594,26 @@ async function reviewEvidenceAs(account, workspace, base) {
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
+}
+
+// The project's own check (0143), as the account that ran the executor, in its
+// runtime's sandbox shell and without network: the same reach the executor's
+// own test run had, minus the network (project-check.mjs).
+// It runs in the run's own cgroup leaf, so the run's memory limit bounds it as
+// it bounded the executor; the leaf is released after it, with the rest.
+// `command`, not a literal, as in gitAs: the sandbox shell is a tool, not a
+// runtime, and the registry test holds every runtime launch to its driver.
+async function projectCheckAs(account, adapter, workspace, check, leaf, command = SANDBOX_SHELL) {
+  return await runProjectCheck({
+    command: check.command, timeoutSeconds: Number(check.timeout_seconds) || 600,
+    spawnCheck: async (args, { timeout }) => {
+      const [launcher, argv] = isolation.launcher(leaf, "/usr/sbin/runuser",
+        cleanRuntimeArgs(account, workspace, command, args,
+          [...sandboxShellEnvironment(adapter), "INFRA_COD_SANDBOX_NO_NET=1", "CI=1"]));
+      const result = await runProcess(launcher, argv, { cwd: workspace, timeout, maxBytes: 8 * 1024 * 1024 });
+      return { code: result.code, stdout: result.stdout.toString("utf8"), stderr: result.stderr };
+    },
+  });
 }
 
 // Materialises a project workspace. Everything it acts on comes from the
@@ -2226,6 +2248,24 @@ async function runFencedBatch(request, driver, control = new LaunchControl()) {
           `SELECT to_jsonb(review_evidence_base(:'run_id'::uuid))::text;`, { run_id: request.run_id },
         );
         const evidence = await reviewEvidenceAs(evidenceAccount, context.workspace, base);
+        // The owner's check command, run by the platform while the run still
+        // holds the workspace (0143). Its outcome is a platform check: the
+        // reviewer reads it as a fact, and a failure blocks the publish.
+        // A fault of the platform's own here — the database read, the sandbox
+        // setup — is a failed check, not a run that loses its accepted report.
+        let projectCheck = null;
+        let outcome = null;
+        try {
+          projectCheck = await queryJson(`SELECT project_check_for_run(:'run_id'::uuid)::text;`, { run_id: request.run_id });
+          if (projectCheck?.command) outcome = await projectCheckAs(evidenceAccount, adapterFor(driver.name), context.workspace, projectCheck, leaf);
+        } catch (error) {
+          outcome = { name: "project_checks", status: "failed", command: projectCheck?.command ?? "",
+            detail: `the platform could not run the check: ${String(error?.message ?? error).slice(0, 300)}`, output: "" };
+        }
+        if (outcome) {
+          evidence.platform_verified_checks = [...(evidence.platform_verified_checks ?? []), outcome];
+          process.stderr.write(`${JSON.stringify({ type: "project_check.finished", run_id: request.run_id, status: outcome.status, detail: outcome.detail })}\n`);
+        }
         await queryJson(
           `SELECT record_review_evidence(
             :'job_id'::bigint, :'supervisor_id', :'run_id'::uuid, :'fencing_token'::bigint, :'evidence'::jsonb
