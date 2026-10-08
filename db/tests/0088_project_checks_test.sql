@@ -41,8 +41,10 @@ BEGIN
 
   INSERT INTO tasks(project_id,title,objective,status,created_by,acceptance_criteria)
     VALUES(v_project,'Check it','Make it.','implementing','test','["done"]') RETURNING id INTO v_task;
-  INSERT INTO agents(name, runtime_profile_id) VALUES ('check-probe', (SELECT id FROM runtime_profiles LIMIT 1)) RETURNING id INTO v_agent;
+  -- A run needs an agent and an agent a runtime profile; neither matters here,
+  -- so both are written without their foreign keys checked.
   SET LOCAL session_replication_role = replica;
+  INSERT INTO agents(name, runtime_profile_id) VALUES ('check-probe', gen_random_uuid()) RETURNING id INTO v_agent;
   INSERT INTO task_runs(task_id, agent_id, phase) VALUES (v_task, v_agent, 'implementation') RETURNING id INTO v_run;
   SET LOCAL session_replication_role = origin;
   v_answer := project_check_for_run(v_run);
