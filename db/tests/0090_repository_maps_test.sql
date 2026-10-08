@@ -66,8 +66,8 @@ BEGIN
     'sha256:'||repeat('e',64),'{"worktree":"infra-cod-worktree-v1","patch":"infra-cod-patch-v1"}','sha1',true,
     (SELECT jsonb_agg(jsonb_build_object('path','src/f'||n||'.ts','status','M')) FROM generate_series(1,10) n),
     '{}','','{}','{}','[]','map-test');
-  INSERT INTO domain_events(event_type,project_id,task_id,actor_type,actor_id,correlation_id,aggregate_type,aggregate_id,aggregate_version,payload)
-    VALUES('chat.user_message',v_project,v_task,'system','map-test','map-test','task',v_task,1,'{}') RETURNING id INTO v_event;
+  INSERT INTO domain_events(event_type,project_id,task_id,conversation_id,conversation_sequence,actor_type,actor_id,correlation_id,aggregate_type,aggregate_id,aggregate_version,payload)
+    VALUES('chat.user_message',v_project,v_task,(SELECT conversation_id FROM tasks WHERE id=v_task),9001,'system','map-test','map-test','task',v_task,1,'{}') RETURNING id INTO v_event;
   INSERT INTO runtime_jobs(source_event_id,job_type,project_id,task_id,status,leased_by,leased_until)
     VALUES(v_event,'orchestrator_turn',v_project,v_task,'in_flight','map-worker',clock_timestamp()+interval '5 minutes') RETURNING id INTO v_job;
   SET LOCAL session_replication_role = origin;
