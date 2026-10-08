@@ -699,6 +699,11 @@ INSERT INTO infra_web_allowlist(signature) VALUES
   ('add_project_analyst(p_project_id uuid, p_owner_id uuid, p_expected_version bigint, p_entry_id uuid, p_name text, p_instructions text, p_actor text, p_correlation_id text, p_reasoning_effort text)'),
   ('update_project_analyst(p_project_id uuid, p_owner_id uuid, p_expected_version bigint, p_analyst_id uuid, p_name text, p_instructions text, p_actor text, p_correlation_id text)'),
   ('remove_project_analyst(p_project_id uuid, p_owner_id uuid, p_expected_version bigint, p_analyst_id uuid, p_actor text, p_correlation_id text)'),
+  -- 0151 (M7): a member's own subagents, read and set on the Team page, and a
+  -- stop for a question the analyst is reading; each checks the owner itself.
+  ('set_project_member_subagents(p_project_id uuid, p_owner_id uuid, p_expected_version bigint, p_member_id uuid, p_enabled boolean, p_actor text, p_correlation_id text)'),
+  ('project_member_subagents(p_project_id uuid, p_owner_id uuid)'),
+  ('request_consultation_stop(p_project_id uuid, p_owner_id uuid, p_consultation_id uuid, p_actor text)'),
   -- 0088 (sprint C U1): read-only. The four readiness states of every
   -- assignment of a project, checking the owner itself; it reads
   -- provider_connections, which infra_web may not, so it is SECURITY DEFINER.

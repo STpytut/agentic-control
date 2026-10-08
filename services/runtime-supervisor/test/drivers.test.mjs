@@ -374,7 +374,7 @@ test("OpenCode's project surface is a read-only batch whose run config denies wh
   // bubblewrap mount: no sandbox shell there.
   assert.ok(!turn.some((entry) => entry.startsWith("SHELL=")));
   const implementation = opencode.run.environment({ surface: "task" });
-  assert.deepEqual(configOf(implementation), { permission: LOGIN_PERMISSION, tools: { delegate_task: false, request_revision: false, consult: false } });
+  assert.deepEqual(configOf(implementation), { permission: LOGIN_PERMISSION, tools: { delegate_task: false, request_revision: false, consult: false, task: false } });
   assert.ok(!implementation.includes("OPENCODE_DISABLE_PROJECT_CONFIG=true"), "the executor's behaviour changed");
   // Stage 12 M0: every open shell runs in the sandbox shell, the login covered.
   for (const environment of [implementation, opencode.run.environment({ surface: "gate" }), opencode.run.environment()]) {
@@ -666,5 +666,34 @@ test("an analyst's consult surface is a read-only snapshot run with no tool of t
   assert.equal(config.permission.bash, "deny");
   assert.equal(config.permission.edit, "deny");
   assert.ok(Object.entries(config.tools).every(([, enabled]) => enabled === false));
-  assert.deepEqual(Object.keys(config.tools).sort(), ["complete_task", "consult", "delegate_task", "report_blocker", "request_revision", "request_user_input"]);
+  assert.deepEqual(Object.keys(config.tools).sort(), ["complete_task", "consult", "delegate_task", "report_blocker", "request_revision", "request_user_input", "task"]);
+});
+
+// M7: a runtime's own subagents, only for a member the operator allowed them.
+test("subagents are offered to a writer or an analyst only when the member allows them", () => {
+  const claude = driverFor("claude");
+  const after = (argv, flag) => argv[argv.indexOf(flag) + 1];
+  for (const surface of ["task", "consult"]) {
+    assert.doesNotMatch(after(claude.run.argv({ model: "haiku", prompt: "x", surface }), "--tools"), /Task/);
+    const on = claude.run.argv({ model: "haiku", prompt: "x", surface, subagents: true });
+    assert.match(after(on, "--tools"), /,Task$/);
+    assert.match(after(on, "--allowedTools"), /\bTask\b/);
+  }
+  assert.doesNotMatch(claude.run.argv({ model: "haiku", prompt: "x", surface: "project", subagents: true }).join(" "), /\bTask\b/,
+    "the orchestrator's turn is not changed");
+
+  const opencode = driverFor("opencode");
+  const toolsOf = (environment) => JSON.parse(environment.find((entry) => entry.startsWith("OPENCODE_CONFIG_CONTENT="))
+    .slice("OPENCODE_CONFIG_CONTENT=".length)).tools;
+  for (const surface of ["task", "consult"]) {
+    assert.equal(toolsOf(opencode.run.environment({ surface })).task, false);
+    assert.equal(toolsOf(opencode.run.environment({ surface, subagents: true })).task, true);
+  }
+
+  const codex = driverFor("codex");
+  const version = adapterFor("codex").baselineVersion ?? "0.160.0";
+  const off = codex.run.argv({ surface: "task", model: "gpt", prompt: "x", version });
+  const on = codex.run.argv({ surface: "task", model: "gpt", prompt: "x", version, subagents: true });
+  assert.ok(off.includes("features.multi_agent=false"));
+  assert.ok(!on.includes("features.multi_agent=false"));
 });

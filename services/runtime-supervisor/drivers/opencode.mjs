@@ -82,8 +82,15 @@ const RUN_CONFIG = Object.freeze({
 // executor's `cat ~/.local/share/opencode/auth.json` worked). A turn's shell
 // runs `git status` and nothing else, under a Landlock ruleset that would not
 // let bubblewrap mount anyway.
-function runEnvironment({ surface = null, toolBridge = [] } = {}) {
-  const config = RUN_CONFIG[surface ?? "gate"];
+// OpenCode's own subagents (M7): its `task` tool, on by default, is off for a
+// writer or an analyst the operator did not allow them.
+const SUBAGENT_SURFACES = new Set(["task", "consult"]);
+
+function runEnvironment({ surface = null, toolBridge = [], subagents = false } = {}) {
+  const base = RUN_CONFIG[surface ?? "gate"];
+  const config = base && SUBAGENT_SURFACES.has(surface)
+    ? { ...base, tools: { ...(base.tools ?? {}), task: Boolean(subagents) } }
+    : base;
   return [
     ...adapter.autoUpdate.environment, "OPENCODE_AUTO_SHARE=false",
     // A turn and an analyst's run (0147) read a repository nobody vetted: its

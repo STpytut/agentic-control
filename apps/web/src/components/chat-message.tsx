@@ -1,6 +1,7 @@
 "use client";
 
 import { RuntimeMark } from "@/components/runtime-mark";
+import { controlPlaneActionHeaders } from "@/lib/csrf-client";
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -38,7 +39,8 @@ export function ChatMessage({ message, timeLabel, modelLabel }: { message: ChatM
   if (message.role === "system" && !message.notice) {
     return <p className="type-meta mb-5 ml-11 flex items-baseline gap-2 text-muted" title={message.eventType} data-event-type={message.eventType}>
       <span aria-hidden="true" className={cx("shrink-0", completion && "text-success")}>{completion ? "✓" : "↳"}</span>
-      <span className="min-w-0">{message.content} <time className="whitespace-nowrap">· {timeLabel}</time></span>
+      <span className="min-w-0">{message.content} <time className="whitespace-nowrap">· {timeLabel}</time>
+        {message.stopConsultation && <StopConsultation {...message.stopConsultation}/>}</span>
     </p>;
   }
   if (message.role === "system") {
@@ -71,4 +73,24 @@ export function ChatMessage({ message, timeLabel, modelLabel }: { message: ChatM
       <div className="message-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown></div>
     </div>
   </article>;
+}
+
+// M7 (0151): stop a question an analyst is still reading. The worker cancels
+// the run within a few seconds and the orchestrator is told it was stopped.
+function StopConsultation({ projectId, consultationId }: { projectId: string; consultationId: string }) {
+  const [state, setState] = useState<"idle" | "stopping" | "stopped" | "error">("idle");
+  async function stop() {
+    setState("stopping");
+    try {
+      const response = await fetch("/api/control-plane/actions", { method: "POST", headers: controlPlaneActionHeaders(),
+        body: JSON.stringify({ kind: "consultation_stop", projectId, consultationId }) });
+      const answer = await response.json();
+      setState(response.ok && answer.ok ? "stopped" : "error");
+    } catch {
+      setState("error");
+    }
+  }
+  if (state === "stopped") return <span className="ml-2 text-muted">· stopping the analyst…</span>;
+  return <button type="button" className="ml-2 font-medium text-ink underline-offset-4 hover:underline disabled:opacity-50"
+    disabled={state === "stopping"} onClick={stop}>{state === "error" ? "Stop failed — retry" : "Stop"}</button>;
 }

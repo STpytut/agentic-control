@@ -161,8 +161,28 @@ BEGIN
   END IF;
   v_reason := pg_temp.reason_of(format($q$SELECT consultation_job_context(%s,'someone-else')$q$, v_run_job.id));
   IF v_reason IS DISTINCT FROM 'consultation_not_held' THEN RAISE EXCEPTION 'another worker read the context: %', v_reason; END IF;
+  -- M7 (0151): the run's tokens, counted under its job, become the analyst's.
+  -- As the supervisor writes it: an activity event under the leased job, which
+  -- the usage trigger turns into the run's row.
+  PERFORM append_runtime_activity_event(v_run_job.id, 'consult-worker', 'opencode', 'runtime.turn.usage', 'running',
+    'tokens', '{"tokens":{"input":1000,"output":200}}'::jsonb);
+  IF (SELECT total_tokens FROM run_usage WHERE job_id=v_run_job.id) IS DISTINCT FROM 1200 THEN
+    RAISE EXCEPTION 'the analyst''s activity was not counted: %', (SELECT to_jsonb(u) FROM run_usage u WHERE job_id=v_run_job.id);
+  END IF;
+  IF (v_context->>'allow_subagents')::boolean IS DISTINCT FROM false OR (v_context->>'stop_requested')::boolean IS DISTINCT FROM false THEN
+    RAISE EXCEPTION 'context lacks M7 fields: %', v_context;
+  END IF;
   PERFORM finish_consultation(v_run_job.id, 'consult-worker',
     jsonb_build_object('status','answered','answer','src/timer.js:42 resets it; app.js:10 calls it.','model','analyst-free-b','snapshot_sha',repeat('a',40)));
+  IF (SELECT analyst_id FROM run_usage WHERE job_id=v_run_job.id) IS DISTINCT FROM v_analyst
+     OR (SELECT model FROM run_usage WHERE job_id=v_run_job.id) <> 'analyst-free-b' THEN
+    RAISE EXCEPTION 'the run''s tokens were not named the analyst''s';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(get_task_usage(v_project, v_task, v_owner)->'members') m
+                 WHERE m->>'role_key'='analyst' AND m->>'agent_name'='Security reviewer'
+                   AND (m#>>'{usage,total_tokens}')::bigint = 1200) THEN
+    RAISE EXCEPTION 'the chat''s usage does not list the analyst: %', get_task_usage(v_project, v_task, v_owner)->'members';
+  END IF;
   IF (SELECT status FROM consultations WHERE id=v_consultation) <> 'answered'
      OR (SELECT status FROM runtime_jobs WHERE id=v_run_job.id) <> 'completed' THEN
     RAISE EXCEPTION 'the answer was not recorded';
@@ -218,6 +238,31 @@ BEGIN
   IF v_reason IS DISTINCT FROM 'orchestration_job_not_leased' THEN
     RAISE EXCEPTION 'a review''s resume delegated: %', v_reason;
   END IF;
+
+  -- M7: subagents per member — an executor's and an analyst's, off by default.
+  IF (project_member_subagents(v_project, v_owner)->>v_executor::text)::boolean IS DISTINCT FROM false
+     OR (project_member_subagents(v_project, v_owner)->>v_analyst::text)::boolean IS DISTINCT FROM false THEN
+    RAISE EXCEPTION 'subagents are not off by default: %', project_member_subagents(v_project, v_owner);
+  END IF;
+  PERFORM set_project_member_subagents(v_project, v_owner, (SELECT version FROM project_runtime_defaults WHERE project_id=v_project), v_executor, true, 'o', 'c');
+  PERFORM set_project_member_subagents(v_project, v_owner, (SELECT version FROM project_runtime_defaults WHERE project_id=v_project), v_analyst, true, 'o', 'c');
+  IF (SELECT config->>'allow_subagents' FROM project_agent_assignments WHERE id=v_executor) <> 'true'
+     OR NOT (SELECT allow_subagents FROM project_analysts WHERE id=v_analyst) THEN
+    RAISE EXCEPTION 'subagents were not allowed';
+  END IF;
+  v_reason := pg_temp.reason_of(format($q$SELECT set_project_member_subagents(%L,%L,%s,%L,true,'o','c')$q$, v_project, v_owner,
+    (SELECT version FROM project_runtime_defaults WHERE project_id=v_project), v_orchestrator));
+  IF v_reason IS DISTINCT FROM 'team_member_unavailable' THEN RAISE EXCEPTION 'the orchestrator got a subagent switch: %', v_reason; END IF;
+
+  -- M7: the owner stops a question still being read; a finished one is refused.
+  SELECT id INTO v_consultation FROM consultations WHERE task_id=v_task AND status='requested' LIMIT 1;
+  PERFORM request_consultation_stop(v_project, v_owner, v_consultation, 'owner');
+  IF (SELECT stop_requested_at FROM consultations WHERE id=v_consultation) IS NULL THEN RAISE EXCEPTION 'the stop was not recorded'; END IF;
+  v_reason := pg_temp.reason_of(format($q$SELECT request_consultation_stop(%L,%L,%L,'owner')$q$, v_project, gen_random_uuid(), v_consultation));
+  IF v_reason IS DISTINCT FROM 'consultation_not_running' THEN RAISE EXCEPTION 'a stranger stopped a question: %', v_reason; END IF;
+  v_reason := pg_temp.reason_of(format($q$SELECT request_consultation_stop(%L,%L,%L,'owner')$q$, v_project, v_owner,
+    (SELECT id FROM consultations WHERE task_id=v_task AND status='answered' LIMIT 1)));
+  IF v_reason IS DISTINCT FROM 'consultation_not_running' THEN RAISE EXCEPTION 'an answered question was stopped: %', v_reason; END IF;
 
   -- Removing the analyst: it is no longer asked.
   v_version := (remove_project_analyst(v_project, v_owner, (SELECT version FROM project_runtime_defaults WHERE project_id=v_project), v_analyst, 'o', 'c')->>'version')::bigint;

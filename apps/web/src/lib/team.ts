@@ -38,6 +38,8 @@ export type ProjectTeam = {
   projectId: string; managed: boolean; version: number;
   roles: TeamRole[]; runtimes: TeamRuntime[]; assignments: TeamAssignment[];
   models: TeamModel[]; heldBack: TeamHeldBack[]; reasoning: TeamReasoning; analysts: TeamAnalyst[];
+  // M7 (0151): each executor's and analyst's own subagents, by member id.
+  subagents: Record<string, boolean>;
 };
 
 const strings = (value: unknown) => (Array.isArray(value) ? value.map(String) : []);
@@ -82,6 +84,8 @@ export function projectTeamFromRow(row: Json): ProjectTeam {
     })),
     heldBack: list("held_back").map((held) => ({ runtime: text(held.runtime), reason: text(held.reason), count: Number(held.count ?? 0) })),
     reasoning: teamReasoningFrom(row.reasoning),
+    subagents: Object.fromEntries(Object.entries(row.subagents && typeof row.subagents === "object" ? row.subagents as Json : {})
+      .map(([id, allowed]) => [id, allowed === true])),
     analysts: list("analysts").map((analyst) => ({
       id: text(analyst.id), name: text(analyst.name), instructions: text(analyst.instructions), runtime: text(analyst.runtime_type),
       entryId: text(analyst.entry_id), modelId: text(analyst.model_id), displayName: text(analyst.display_name),

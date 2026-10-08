@@ -120,6 +120,8 @@ export type ChatMessage = {
   model?: string;
   // The runtime that wrote it, for its mark beside the name.
   runtime?: string;
+  // M7 (0151): a question an analyst is still reading, which the owner may stop.
+  stopConsultation?: { projectId: string; consultationId: string };
   // A workflow record the operator should not miss (a run that ended without
   // its report, a job that stopped for good) rather than a step of the routine.
   notice?: boolean;
@@ -557,7 +559,8 @@ function interactionMessage(event: EventSummary, sensitive: boolean): ChatMessag
   // Stage 12 (0147): the orchestrator's question to an analyst, and the
   // analyst's answer as its own message, with the model that wrote it.
   if (event.eventType === "consultation.requested" && typeof payload.question === "string") {
-    return { ...base, role: "system", author: "", content: `The orchestrator asked ${String(payload.analyst ?? "an analyst")}: ${payload.question}` };
+    return { ...base, role: "system", author: "", content: `The orchestrator asked ${String(payload.analyst ?? "an analyst")}: ${payload.question}`,
+      ...(typeof payload.consultation_id === "string" ? { stopConsultation: { projectId: "", consultationId: payload.consultation_id } } : {}) };
   }
   if (event.eventType === "consultation.answered" && typeof payload.answer === "string") {
     return { ...base, role: "agent", author: String(payload.analyst ?? "Analyst"), actorRole: "analyst",
@@ -576,11 +579,14 @@ function interactionMessage(event: EventSummary, sensitive: boolean): ChatMessag
   return null;
 }
 
-export function conversationMessages(events: EventSummary[], task?: TaskSummary): ChatMessage[] {
+export function conversationMessages(events: EventSummary[], task?: TaskSummary, projectId?: string): ChatMessage[] {
   let sensitive = false;
   const sides: Sides = { orchestrator: task?.orchestratorRuntime ? runtimeLabel(task.orchestratorRuntime) : "The orchestrator", executor: "the executor" };
   // The resumed turn after an analyst's answer (0147) is not a review.
   let afterConsultation = false;
+  // A question still being read keeps its Stop; one answered or failed does not.
+  const finished = new Set(events.filter((event) => event.eventType === "consultation.answered" || event.eventType === "consultation.failed")
+    .map((event) => String((event.payload as Record<string, unknown>).consultation_id ?? "")));
   return events.map((event) => {
     if (event.eventType === "run.input_requested") sensitive = (event.payload as Record<string, unknown>).sensitivity === "sensitive";
     const actors = (event.actors ?? {}) as Json;
@@ -588,6 +594,10 @@ export function conversationMessages(events: EventSummary[], task?: TaskSummary)
     if (actors.to_runtime) sides.executor = runtimeLabel(String(actors.to_runtime));
     const message = interactionMessage(event, sensitive) ?? messageFromEvent(event, task, { ...sides });
     if (message.actorRole === "reviewer" && afterConsultation) message.actorRole = "orchestrator";
+    if (message.stopConsultation) {
+      if (finished.has(message.stopConsultation.consultationId) || !projectId) delete message.stopConsultation;
+      else message.stopConsultation.projectId = projectId;
+    }
     if (event.eventType.startsWith("consultation.")) afterConsultation = event.eventType !== "consultation.requested";
     else if (event.eventType !== "chat.agent_message") afterConsultation = false;
     if (event.eventType === "changes.requested") sides.revision = true;
@@ -847,7 +857,7 @@ export async function getProjectWorkspace(ownerId: string, projectId: string, re
   const activeEvents = conversationEventRows.map((row) => ({ ...toEvent(row), actors: (row.actors ?? undefined) as Json | undefined,
     selectedModel: typeof row.selected_model === "string" ? row.selected_model : undefined }));
   const hasInitialMessage = activeEvents.some((event) => event.eventType === "chat.user_message");
-  const messages = conversationMessages(activeEvents, activeTask ?? undefined);
+  const messages = conversationMessages(activeEvents, activeTask ?? undefined, projectId);
   if (activeTask && !hasInitialMessage) messages.unshift({ id: `objective-${activeTask.id}`, role: "user", author: "You", content: activeTask.objective, occurredAt: activeTask.createdAt, eventType: "task.objective" });
   const taskActivityPromise = activeTask ? getTaskActivity(ownerId,projectId,activeTask.id) : Promise.resolve(null);
   const usagePromise = activeTask ? getConversationUsage(ownerId,projectId,activeTask.id) : Promise.resolve([]);
@@ -1473,7 +1483,8 @@ export async function getProjectTeam(projectId: string, ownerId: string): Promis
   // the models the tab offers (0111).
   const rows = await queryJsonRows(`SELECT (project_team(:'project_id'::uuid,:'owner_id'::uuid)
       || jsonb_build_object('reasoning',project_team_reasoning(:'project_id'::uuid,:'owner_id'::uuid),
-        'analysts',project_analyst_list(:'project_id'::uuid,:'owner_id'::uuid)))::text;`,
+        'analysts',project_analyst_list(:'project_id'::uuid,:'owner_id'::uuid),
+        'subagents',project_member_subagents(:'project_id'::uuid,:'owner_id'::uuid)))::text;`,
     { project_id: projectId, owner_id: ownerId });
   return rows[0] ? projectTeamFromRow(rows[0]) : null;
 }
