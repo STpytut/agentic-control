@@ -1182,6 +1182,12 @@ async function runConsultBatch(request, driver, control = new LaunchControl()) {
   let interrupted = false;
   let timedOut = false;
   let resolvedModel = null;
+  let activity = Promise.resolve();
+  const appendActivity = (event) => queryJson(`SELECT append_runtime_activity_event(:'job_id'::bigint,:'worker_id',:'runtime_type',
+    :'event_type',:'phase',:'summary',:'details'::jsonb)::text;`, {
+    job_id: request.job_id, worker_id: request.worker_id, runtime_type: driver.name, event_type: event.eventType,
+    phase: event.phase, summary: event.summary, details: JSON.stringify(event.details ?? {}),
+  });
   try {
     const snapshot = await inWorkspaceTurn(workspace, async () => {
       const owner = inspectOwner((await stat(workspace)).uid, runtimeUid);
@@ -1193,7 +1199,9 @@ async function runConsultBatch(request, driver, control = new LaunchControl()) {
     const args = cleanRuntimeArgs(account, snapshotDir, driver.executable, driver.run.argv({
       model: driver.run.qualifyModel(context.provider_id ?? null, context.model),
       prompt: request.prompt, surface: "consult", reasoningEffort: context.reasoning_effort ?? null,
-    }), driver.run.environment({ surface: "consult" }), { readOnlyWritable: driver.run.readOnlyWritable });
+      subagents: context.allow_subagents === true,
+    }), driver.run.environment({ surface: "consult", subagents: context.allow_subagents === true }),
+    { readOnlyWritable: driver.run.readOnlyWritable });
     leaf = await isolation.create(`consult-${randomUUID()}`, runMemoryLimit(driver));
     child = isolation.launch(leaf, "/usr/sbin/runuser", args, { cwd: snapshotDir, stdio: ["ignore", "pipe", "pipe"] });
     const memory = watchMemory(leaf);
@@ -1215,7 +1223,11 @@ async function runConsultBatch(request, driver, control = new LaunchControl()) {
       lineBuffer = lines.pop() ?? "";
       for (const line of lines) {
         const parsed = driver.stream.parse(line);
-        if (parsed) resolvedModel ??= driver.stream.resolvedModel?.(parsed.raw) ?? null;
+        if (!parsed) continue;
+        resolvedModel ??= driver.stream.resolvedModel?.(parsed.raw) ?? null;
+        // 0151: the analyst's activity under its job, as a turn's is: the
+        // usage trigger counts its tokens from it.
+        if (parsed.event) activity = activity.then(() => appendActivity(parsed.event)).catch(() => {});
       }
     });
     child.stderr.on("data", (chunk) => (stderr = collect(stderr, chunk)));
@@ -1225,6 +1237,7 @@ async function runConsultBatch(request, driver, control = new LaunchControl()) {
     });
     clearTimeout(timer);
     await memory?.stop().catch(() => null);
+    await activity;
     if (exitCode === READ_ONLY_LAUNCH_EXIT) throw new Error(`the read-only launch was refused: ${stderr.trim().split("\n").at(-1) ?? ""}`);
     if (outputExceeded) throw new Error("the analyst's output exceeded 4 MiB");
     if (timedOut) throw new Error(`the analyst ran past ${CONSULT_TIMEOUT_MS / 60_000} minutes and was ended`);
@@ -1948,7 +1961,10 @@ async function validateExecutorLaunch(request) {
       'snapshot_authorized', (lm.launch->>'snapshot_authorized')::boolean,
       'snapshot_mismatch', (lm.launch->>'snapshot_mismatch')::boolean,
       'agent_id', a.id, 'task_id', t.id,
-      'commit_identity', commit_identity_for(j.project_id)
+      'commit_identity', commit_identity_for(j.project_id),
+      -- M7 (0151): the runtime's own subagents, as the operator set for this
+      -- executor on the Team page; off unless allowed.
+      'allow_subagents', COALESCE((pa.config->>'allow_subagents')::boolean, false)
     )::text
     FROM runtime_jobs j
     JOIN projects p ON p.id = j.project_id
@@ -2244,9 +2260,11 @@ async function runFencedBatch(request, driver, control = new LaunchControl()) {
         surface: "task",
         reasoningEffort: context.reasoning_effort ?? null,
         version: activeVersionOf(driver.name),
+        subagents: context.allow_subagents === true,
       }),
       [...driver.run.environment({
         surface: "task",
+        subagents: context.allow_subagents === true,
         toolBridge: driver.toolBridge.environment({ socket: toolSocket.path, capability, runId: context.run_id,
           sessionId: request.native_session_id ?? newSessionId }),
       }), ...commitIdentityEnvironment(context.commit_identity)],

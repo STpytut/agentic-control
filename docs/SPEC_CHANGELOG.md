@@ -1,5 +1,11 @@
 # Spec Changelog
 
+## 2026-10-08 — usage per member, a stop for a question, subagents per member (rc.141, Stage 12 M7)
+
+- **An analyst's tokens are counted as its own** (migration 0151). Its run writes its activity under its job, so the usage trigger records its tokens; `finish_consultation` names the analyst (`run_usage.analyst_id`) and the model. The chat's usage lists the analysts it asked beside the orchestrator and executors, and the side panel shows each analyst with its tokens.
+- **The owner can stop a question while the analyst reads it.** The chat line "The orchestrator asked …" has a Stop until the answer arrives. The consultation worker sees the request within five seconds and cancels the run through the supervisor. The orchestrator is told the owner stopped it and is asked not to ask again.
+- **A runtime's own subagents are each member's to allow.** These are Claude Code's `Task`, Codex's `multi_agent` and OpenCode's `task`. Each executor and analyst on the Team page has an "Allow subagents" switch, off by default. Codex and OpenCode had them on by default, and their writers and analysts now run with them off unless allowed. The orchestrator's turn is unchanged.
+
 ## 2026-10-08 — the approved commit is published after the workspace moved on (rc.140)
 
 - **A publish pushes the approved commit even when the next task has committed on top of it** (migration 0150). One workspace holds a project's tasks in turn, and on rc.139 an approval that came after the next task's commit was refused (`review_evidence_digest_moved`) while the next task's pull request carried both. A commit id names its tree and history, so the preparation now accepts a moved workspace when the review saw the work committed, the base is the same, and the workspace's HEAD still contains the approved commit (asked of git as the workspace's owner). The export packs that commit rather than requiring HEAD to be it. A workspace that no longer contains the commit is still refused, naming its ref.

@@ -894,6 +894,22 @@ export async function performControlPlaneAction(body: Record<string, unknown>, o
         instructions: analystText(body.instructions, 4000, "instructions"), actor, correlation },
     );
   }
+  // M7 (0151): a runtime's own subagents for one executor or analyst.
+  if (kind === "team_set_subagents") {
+    return executeJson(
+      `SELECT set_project_member_subagents(:'project_id'::uuid,:'owner_id'::uuid,:'version'::bigint,:'member_id'::uuid,
+        :'enabled'::boolean,:'actor',:'correlation')::text;`,
+      { project_id: ownedProjectId, owner_id: operator.userId, version: String(version(body.teamVersion)),
+        member_id: uuid(body.memberId, "memberId"), enabled: String(body.enabled === true), actor, correlation },
+    );
+  }
+  // The owner stops a question an analyst is still reading.
+  if (kind === "consultation_stop") {
+    return executeJson(
+      `SELECT request_consultation_stop(:'project_id'::uuid,:'owner_id'::uuid,:'consultation_id'::uuid,:'actor')::text;`,
+      { project_id: ownedProjectId, owner_id: operator.userId, consultation_id: uuid(body.consultationId, "consultationId"), actor },
+    );
+  }
   if (kind === "team_remove_analyst") {
     return executeJson(
       `SELECT remove_project_analyst(:'project_id'::uuid,:'owner_id'::uuid,:'version'::bigint,:'analyst_id'::uuid,:'actor',:'correlation')::text;`,

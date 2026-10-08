@@ -60,6 +60,15 @@ const DENIED_READS = "Read(~/.claude/**),Read(~/.claude.json)";
 
 // Each surface's tools and permissions. The gate asks for a word and needs no
 // tool at all; a turn reads the workspace and calls the platform.
+// Claude Code's own subagents (M7): its `Task` tool ("Agent" is the same tool
+// under its newer name, as the init event lists it on 2.1.294), offered only to
+// a member the operator allowed them. A subagent runs in the same process, with
+// the same tools, permission rules, sandbox and cgroup as its parent. The
+// subagents it may start are Claude Code's built-in ones: with
+// `--setting-sources user` a repository's own `.claude/agents` are not loaded —
+// shown on the host with a probe agent, listed only under `user,project`.
+const withSubagents = (tools, subagents) => (subagents ? `${tools},Task` : tools);
+
 const SURFACE_ARGS = Object.freeze({
   project: () => [
     "--tools", READ_TOOLS,
@@ -70,16 +79,16 @@ const SURFACE_ARGS = Object.freeze({
   ],
   gate: () => ["--tools", "", "--disallowedTools", DENIED_READS, "--strict-mcp-config", "--permission-mode", "dontAsk"],
   // An analyst's run (0147): the snapshot read, nothing called, nothing written.
-  consult: () => [
-    "--tools", READ_TOOLS, "--allowedTools", READ_TOOLS, "--disallowedTools", DENIED_READS,
+  consult: ({ subagents = false } = {}) => [
+    "--tools", withSubagents(READ_TOOLS, subagents), "--allowedTools", withSubagents(READ_TOOLS, subagents), "--disallowedTools", DENIED_READS,
     "--strict-mcp-config", "--permission-mode", "dontAsk",
   ],
   // An executor's run (Stage 12 X1): the workspace granted read-write, its
   // tools pre-approved and nothing else (`dontAsk`), its terminal reports as
   // MCP tools of the same bridge (INFRA_BRIDGE_TOOLS=reports in its environment).
-  task: () => [
-    "--tools", WRITE_TOOLS,
-    "--allowedTools", [WRITE_TOOLS, ...REPORT_TOOLS].join(","),
+  task: ({ subagents = false } = {}) => [
+    "--tools", withSubagents(WRITE_TOOLS, subagents),
+    "--allowedTools", [withSubagents(WRITE_TOOLS, subagents), ...REPORT_TOOLS].join(","),
     "--disallowedTools", DENIED_READS,
     "--mcp-config", mcpConfig(),
     "--strict-mcp-config", "--permission-mode", "dontAsk",
@@ -252,13 +261,13 @@ export const claudeDriver = Object.freeze({
     // no option can take the prompt as one of its values (the PoC's order).
     // --effort only when the member has a level: none leaves the model's own
     // default, and the flag does not persist past this process.
-    argv: ({ model, sessionId = null, newSessionId = null, prompt, surface = "gate", reasoningEffort = null }) => {
+    argv: ({ model, sessionId = null, newSessionId = null, prompt, surface = "gate", reasoningEffort = null, subagents = false }) => {
       if (surface === "account") return ["auth", "login"];
       const surfaceArgs = SURFACE_ARGS[surface];
       if (!surfaceArgs) throw new Error(`Claude Code has no ${JSON.stringify(surface)} surface`);
       const effort = launchReasoningLevel(claudeDriver, reasoningEffort);
       return [
-        "-p", ...surfaceArgs(), "--setting-sources", "user", ...sessionArgs({ sessionId, newSessionId }),
+        "-p", ...surfaceArgs({ subagents }), "--setting-sources", "user", ...sessionArgs({ sessionId, newSessionId }),
         ...(effort ? ["--effort", effort] : []),
         "--output-format", "stream-json", "--verbose", "--model", model, prompt,
       ];

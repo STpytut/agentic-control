@@ -7,6 +7,7 @@ import { useState } from "react";
 import { Button, Card } from "@agentic/design-system";
 import { TeamModelPicker } from "@/components/team-model-picker";
 import { ANALYST_PICKER } from "@/lib/team-candidates";
+import { SubagentSwitch } from "@/components/subagent-switch";
 
 type Submit = (key: string, body: Record<string, unknown>) => Promise<{ ok: boolean; text: string }>;
 
@@ -43,6 +44,8 @@ export function TeamAnalysts({ team, models, busy, submit }: {
               if (result.ok) setEditing(null);
             }}/></li>
         : <AnalystRow key={analyst.id} analyst={analyst} busy={busy} onEdit={() => setEditing(analyst.id)}
+            subagents={team.subagents[analyst.id] === true}
+            onSubagents={(enabled) => submit(`subagents:${analyst.id}`, { kind: "team_set_subagents", projectId: team.projectId, memberId: analyst.id, enabled })}
             onRemove={() => submit(`analyst-remove:${analyst.id}`, { kind: "team_remove_analyst", projectId: team.projectId, analystId: analyst.id })}/>)}
     </ul>
 
@@ -79,7 +82,9 @@ export function TeamAnalysts({ team, models, busy, submit }: {
   </Card>;
 }
 
-function AnalystRow({ analyst, busy, onEdit, onRemove }: { analyst: TeamAnalyst; busy: string; onEdit: () => void; onRemove: () => void }) {
+function AnalystRow({ analyst, busy, onEdit, onRemove, subagents, onSubagents }: {
+  analyst: TeamAnalyst; busy: string; onEdit: () => void; onRemove: () => void; subagents: boolean; onSubagents: (enabled: boolean) => void;
+}) {
   return <li className="min-w-0 border-t border-line pt-3 first-of-type:border-t-0 first-of-type:pt-0">
     <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
       <strong className="type-card-title [overflow-wrap:anywhere]">{analyst.name}</strong>
@@ -90,6 +95,7 @@ function AnalystRow({ analyst, busy, onEdit, onRemove }: { analyst: TeamAnalyst;
       Its model is {analyst.modelStatus}: the orchestrator&apos;s questions to it will fail until the model is verified again.
     </p>}
     <p className="type-meta mt-1 whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">{analyst.instructions || "No instructions: it answers the question as asked."}</p>
+    <SubagentSwitch memberId={analyst.id} allowed={subagents} busy={busy} onChange={onSubagents}/>
     <div className="mt-2 flex flex-wrap gap-2">
       <Button variant="secondary" size="sm" disabled={Boolean(busy)} onClick={onEdit}>Edit</Button>
       <Button variant="secondary" size="sm" disabled={Boolean(busy)} onClick={onRemove}>

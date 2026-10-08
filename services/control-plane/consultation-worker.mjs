@@ -8,7 +8,7 @@
 // turn, and a turn does not wait for a consultation.
 
 import { queryJson, queryJsonRows } from "./db.mjs";
-import { RuntimeSupervisorClient } from "../runtime-supervisor/client.mjs";
+import { RuntimeSupervisorClient, cancelThrough } from "../runtime-supervisor/client.mjs";
 import { waitForPoll } from "./poll-wait.mjs";
 import { runLeasedJob, runPollLoop } from "./worker-loop.mjs";
 import { buildAnalystPrompt } from "./turn-prompts.mjs";
@@ -64,7 +64,17 @@ async function executeConsultation(job, { workerId, signal }) {
       { job_id: job.id, worker_id: workerId, lease: LEASE }).catch(() => {});
   }, 60_000);
   const supervisor = new RuntimeSupervisorClient();
+  // 0151: the owner may stop the question while the analyst reads; the run is
+  // cancelled through the supervisor, which ends its cgroup.
+  let stopped = false;
+  const stopWatch = setInterval(() => {
+    queryJson(`SELECT to_jsonb(consultation_stop_requested(:'job_id'::bigint, :'worker_id'))::text;`,
+      { job_id: job.id, worker_id: workerId })
+      .then((asked) => { if (asked === true && !stopped) { stopped = true; return cancelThrough(supervisor); } return null; })
+      .catch(() => {});
+  }, 5_000);
   try {
+    if (context.stop_requested) return await finish(job, workerId, { status: "failed", failure: "the owner stopped the question" });
     await supervisor.connect();
     const prompt = buildAnalystPrompt(context);
     const waitUntil = Date.now() + CAPACITY_WAIT_MS;
@@ -79,11 +89,14 @@ async function executeConsultation(job, { workerId, signal }) {
           await waitForPoll(CAPACITY_RETRY_MS, signal);
           continue;
         }
-        return await finish(job, workerId, { status: "failed", failure: String(error?.message ?? error).slice(0, 300) });
+        return await finish(job, workerId, { status: "failed",
+          failure: stopped ? "the owner stopped the question" : String(error?.message ?? error).slice(0, 300) });
       }
     }
+    if (stopped) return await finish(job, workerId, { status: "failed", failure: "the owner stopped the question" });
     return await finish(job, workerId, consultationOutcome(result, context));
   } finally {
+    clearInterval(stopWatch);
     clearInterval(heartbeat);
     supervisor.close();
   }

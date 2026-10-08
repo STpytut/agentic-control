@@ -384,6 +384,10 @@
     "0150_publish_approved_commit.sql": {
       "previousReleaseCompatible": true,
       "note": "Recreates claim_publish_preparation (one more key in its result) and prepare_publish (accepts a moved workspace that still holds the approved commit) with the same signatures and grants; the previous release's supervisor reports no approved_commit_present and is refused as before."
+    },
+    "0151_member_usage_subagents.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds nullable or defaulted columns (project_analysts.allow_subagents, consultations.stop_requested_*, run_usage.analyst_id) and new functions; recreates consultation_job_context, finish_consultation and get_task_usage with the same signatures and grants, each returning more than before."
     }
   }
 }

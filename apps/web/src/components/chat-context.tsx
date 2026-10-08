@@ -73,6 +73,13 @@ export function TeamTab({ projectId, taskId, readiness, roster, team, models }: 
           <span className="type-mono-small [overflow-wrap:anywhere]">{member.model}</span>
           <span className="type-meta text-muted"><MemberTokens assignmentId={member.assignmentId}/></span>
         </section>)}
+    {/* Stage 12: the analysts the orchestrator may ask, with their tokens in this chat (M7). */}
+    {(team?.analysts ?? []).map((analyst) => <section key={analyst.id} aria-label={`${analyst.name}, analyst`} className="grid min-w-0 gap-0.5 rounded-lg border border-line px-3.5 py-3">
+      <strong className="type-meta font-semibold [overflow-wrap:anywhere]">{analyst.name} · analyst</strong>
+      <span className="type-meta">{runtimeLabel(analyst.runtime)}</span>
+      <span className="type-meta min-w-0 [overflow-wrap:anywhere]">{analyst.displayName || analyst.modelId}</span>
+      <span className="type-meta text-muted">{team?.subagents[analyst.id] ? "subagents allowed · " : ""}<MemberTokens assignmentId={analyst.id}/></span>
+    </section>)}
     {readiness && readiness.assignments.length === 0 && <p className="type-meta text-muted">This project has no enabled assignments.</p>}
     {readiness && <p className="type-meta m-0 flex flex-wrap items-center justify-between gap-x-2 text-muted">
       <span>All checks: {passing} of {checks.length} pass · {readiness.observedAt ? `host reported ${new Date(readiness.observedAt).toISOString().slice(11, 16)} UTC` : "host never reported"}</span>

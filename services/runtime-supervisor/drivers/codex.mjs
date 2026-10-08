@@ -137,11 +137,14 @@ function execFailure(stdout) {
   return `Codex ${cls}${text ? `: ${text.slice(0, 300)}` : ""}`.slice(0, 500);
 }
 
-function execArgv({ model, sessionId = null, prompt, reasoningEffort = null, version = null }) {
+function execArgv({ model, sessionId = null, prompt, reasoningEffort = null, version = null, subagents = false }) {
   const overrides = codexTaskConfigOverrides(version, { node: process.execPath, bridge: BRIDGE });
   if (!overrides) throw new Error(`Codex ${version} cannot hide its login from a writing run; a task needs 0.155.0 or later`);
   const effort = launchReasoningLevel(codexDriver, reasoningEffort);
-  const config = [...overrides, ...(effort ? [`model_reasoning_effort="${effort}"`] : [])].flatMap((value) => ["-c", value]);
+  // Codex's own subagents (M7): `multi_agent` is on by default since 0.160;
+  // a member the operator did not allow them runs with it off.
+  const config = [...overrides, ...(effort ? [`model_reasoning_effort="${effort}"`] : []),
+    ...(subagents ? [] : ["features.multi_agent=false"])].flatMap((value) => ["-c", value]);
   return [...config, "exec", ...(sessionId ? ["resume"] : []), "--json", "--skip-git-repo-check", "-m", model,
     ...(sessionId ? [sessionId] : []), prompt];
 }
@@ -391,8 +394,8 @@ export const codexDriver = Object.freeze({
     // The same app-server for every surface, with the registry's launch
     // configuration before the subcommand (P-2).
     // A task is `codex exec` (Stage 12 X2); every other surface the app-server.
-    argv: ({ version = null, surface = null, model, sessionId = null, prompt, reasoningEffort = null } = {}) => (surface === "task"
-      ? execArgv({ model, sessionId, prompt, reasoningEffort, version })
+    argv: ({ version = null, surface = null, model, sessionId = null, prompt, reasoningEffort = null, subagents = false } = {}) => (surface === "task"
+      ? execArgv({ model, sessionId, prompt, reasoningEffort, version, subagents })
       : [...configOverridesFor(adapter, version).flatMap((override) => ["-c", override]), "app-server", "--listen", "stdio://"]),
     // A task's bridge serves the executor's reports.
     environment: ({ surface = null, toolBridge = [] } = {}) => [...(surface === "task" ? ["INFRA_BRIDGE_TOOLS=reports"] : []), ...toolBridge],
