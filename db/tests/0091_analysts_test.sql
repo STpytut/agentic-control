@@ -200,6 +200,25 @@ BEGIN
     RAISE EXCEPTION 'an empty answer was not a failure';
   END IF;
 
+  -- 0149: the turn that brings an answer may delegate; a review's resume may not.
+  UPDATE tasks SET status='planning' WHERE id=v_task;
+  SET LOCAL session_replication_role = replica;
+  INSERT INTO domain_events(event_type,project_id,task_id,conversation_id,conversation_sequence,actor_type,actor_id,correlation_id,aggregate_type,aggregate_id,aggregate_version,payload)
+    VALUES('consultation.answered',v_project,v_task,(SELECT conversation_id FROM tasks WHERE id=v_task),9200,'agent','analyst','consult-test','consultation',gen_random_uuid(),9,'{}') RETURNING id INTO v_event;
+  INSERT INTO runtime_jobs(source_event_id,job_type,project_id,task_id,status,leased_by,leased_until,payload)
+    VALUES(v_event,'resume_orchestrator',v_project,v_task,'in_flight','answer-worker',clock_timestamp()+interval '5 minutes',
+      '{"event_type":"consultation.answered","correlation_id":"consult-test"}') RETURNING id INTO v_job;
+  SET LOCAL session_replication_role = origin;
+  v_reason := pg_temp.reason_of(format($q$SELECT invoke_delegate_task(%s,'answer-worker','delegate-1','Add the reset button.','["do it"]','[]')$q$, v_job));
+  IF v_reason IS NOT DISTINCT FROM 'orchestration_job_not_leased' THEN
+    RAISE EXCEPTION 'a turn bringing an answer could not delegate';
+  END IF;
+  UPDATE runtime_jobs SET payload='{"event_type":"implementation.completed"}' WHERE id=v_job;
+  v_reason := pg_temp.reason_of(format($q$SELECT invoke_delegate_task(%s,'answer-worker','delegate-2','Add the reset button.','["do it"]','[]')$q$, v_job));
+  IF v_reason IS DISTINCT FROM 'orchestration_job_not_leased' THEN
+    RAISE EXCEPTION 'a review''s resume delegated: %', v_reason;
+  END IF;
+
   -- Removing the analyst: it is no longer asked.
   v_version := (remove_project_analyst(v_project, v_owner, (SELECT version FROM project_runtime_defaults WHERE project_id=v_project), v_analyst, 'o', 'c')->>'version')::bigint;
   IF jsonb_array_length(project_analyst_list(v_project, v_owner)) <> 0 THEN RAISE EXCEPTION 'a removed analyst is listed'; END IF;
