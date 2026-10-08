@@ -30,6 +30,7 @@ import { allDrivers, driverFor, surfaceOf } from "./drivers/index.mjs";
 import { executableDigest, readRuntimes } from "../operations/runtime-inventory.mjs";
 import { PROBE_OUTPUT_MAX_BYTES, checkProbeOutput } from "./provider-usage-check.mjs";
 import { createTokenMeter } from "./run-token-meter.mjs";
+import { systemPromptOf } from "./system-prompt.mjs";
 import { qualificationExecutable, qualificationPaths, scratchReadOnlyWritable, stateToCopy, writableStateInHome } from "./qualification-surface.mjs";
 import { INSTALLATION_LAYOUT } from "../operations/installation-layout.mjs";
 import { createWorkspaceSerializer, resolveWorkspaceGrant } from "./workspace-grant.mjs";
@@ -1166,6 +1167,7 @@ async function runConsultBatch(request, driver, control = new LaunchControl()) {
   if (typeof request.prompt !== "string" || request.prompt.length === 0 || request.prompt.length > 64 * 1024) {
     throw new Error("consultation prompt length is invalid");
   }
+  const systemPrompt = systemPromptOf(request);
   const context = await queryJson(`SELECT consultation_job_context(:'job_id'::bigint, :'worker_id')::text;`,
     { job_id: request.job_id, worker_id: request.worker_id });
   if (context.runtime_type !== driver.name) throw new Error(`consultation ${context.consultation_id} is ${context.runtime_type}'s, not ${driver.name}'s`);
@@ -1199,7 +1201,7 @@ async function runConsultBatch(request, driver, control = new LaunchControl()) {
     control.assertNotCancelled();
     const args = cleanRuntimeArgs(account, snapshotDir, driver.executable, driver.run.argv({
       model: driver.run.qualifyModel(context.provider_id ?? null, context.model),
-      prompt: request.prompt, surface: "consult", reasoningEffort: context.reasoning_effort ?? null,
+      prompt: request.prompt, systemPrompt, surface: "consult", reasoningEffort: context.reasoning_effort ?? null,
       subagents: context.allow_subagents === true, fallbackModel: context.fallback_model ?? null,
     }), driver.run.environment({ surface: "consult", subagents: context.allow_subagents === true }),
     { readOnlyWritable: driver.run.readOnlyWritable });
@@ -2049,6 +2051,7 @@ async function runFencedBatch(request, driver, control = new LaunchControl()) {
   if (typeof request.prompt !== "string" || request.prompt.length === 0 || request.prompt.length > 64 * 1024) {
     throw new Error("worker prompt length is invalid");
   }
+  const systemPrompt = systemPromptOf(request);
   const context = await validateExecutorLaunch(request);
 
   // Admission BEFORE any mutation (ownership, capability, spawn): register a
@@ -2264,6 +2267,7 @@ async function runFencedBatch(request, driver, control = new LaunchControl()) {
         sessionId: request.native_session_id ?? null,
         newSessionId,
         prompt: request.prompt,
+        systemPrompt,
         surface: "task",
         reasoningEffort: context.reasoning_effort ?? null,
         version: activeVersionOf(driver.name),
@@ -2632,6 +2636,7 @@ async function runReadOnlyBatch(request, driver, control = new LaunchControl()) 
   if (typeof request.prompt !== "string" || request.prompt.length === 0 || request.prompt.length > 256 * 1024) {
     throw new Error("turn prompt length is invalid");
   }
+  const systemPrompt = systemPromptOf(request);
   if (typeof request.worker_id !== "string" || !request.worker_id) throw new Error("a turn names the worker that leases it");
   const workerId = request.worker_id;
   const context = await queryJson(`SELECT orchestrator_job_context(:'job_id'::bigint, :'worker_id')::text;`,
@@ -2746,6 +2751,7 @@ async function runReadOnlyBatch(request, driver, control = new LaunchControl()) 
       sessionId: context.native_session_id ?? null,
       newSessionId,
       prompt: request.prompt,
+      systemPrompt,
       surface: request.surface,
       reasoningEffort: context.reasoning_effort ?? null,
     }), driver.run.environment({

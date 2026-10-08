@@ -11,7 +11,7 @@ import { queryJson, queryJsonRows } from "./db.mjs";
 import { RuntimeSupervisorClient, cancelThrough } from "../runtime-supervisor/client.mjs";
 import { waitForPoll } from "./poll-wait.mjs";
 import { runLeasedJob, runPollLoop } from "./worker-loop.mjs";
-import { buildAnalystPrompt } from "./turn-prompts.mjs";
+import { analystInstructions, buildAnalystPrompt } from "./turn-prompts.mjs";
 
 const LEASE = "20 minutes";
 const CAPACITY_WAIT_MS = 10 * 60_000;
@@ -81,7 +81,8 @@ async function executeConsultation(job, { workerId, signal }) {
     let result;
     for (;;) {
       try {
-        result = await supervisor.run({ runtime: context.runtime_type, surface: "consult", jobId: job.id, prompt, workerId });
+        result = await supervisor.run({ runtime: context.runtime_type, surface: "consult", jobId: job.id, prompt,
+          systemPrompt: analystInstructions(context), workerId });
         break;
       } catch (error) {
         // A host without memory for the run: wait for one to finish, within a bound.

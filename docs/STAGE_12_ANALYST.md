@@ -28,7 +28,7 @@ check (0143) already runs the tests and blocks the publish.
 | flow | `consultation.requested` → job `consultation_run` → the supervisor's `consult` surface → `finish_consultation` → `consultation.answered` → `resume_orchestrator` |
 | snapshot | `git archive HEAD` of the workspace, as its owner, in its turn; extracted into a scratch directory owned by the analyst's runtime user; removed after the run |
 | launch | batch, read-only under the Landlock ruleset (as an orchestrator turn), no platform tools, no shell; the answer is the run's final message; 15 minutes, 4 MiB of output |
-| prompt | the analyst's role, its instructions, the question, the repository map's layout |
+| prompt | since rc.143 the analyst's role and the operator's instructions are the run's system prompt (Claude Code `--append-system-prompt`; OpenCode at the head of the prompt); the message is the question and the repository map's layout. Since rc.142 a Claude Code analyst answers by a JSON schema (summary, findings with file and line, open questions) |
 
 The analyst's answer is data the orchestrator reads: it reaches the orchestrator
 fenced and labelled as the analyst's report, never as the operator's words.

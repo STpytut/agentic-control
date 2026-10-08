@@ -138,7 +138,7 @@ test("a run and an account operation name their runtime and surface, and carry o
     await client.account({ runtime: "opencode", operation: "provider_list", provider: "opencode-go" });
     const [task, gate, account] = frames.map(({ request_id: _id, ...frame }) => frame);
     assert.deepEqual(task, { type: "runtime_run", runtime: "opencode", surface: "task", job_id: 7, run_id: "r",
-      project_id: "p", fencing_token: 3, grant_token: "g", prompt: "do", model: "m", native_session_id: "ses_1",
+      project_id: "p", fencing_token: 3, grant_token: "g", prompt: "do", system_prompt: null, model: "m", native_session_id: "ses_1",
       terminal_report_session_id: null });
     assert.deepEqual(gate, { type: "runtime_run", runtime: "opencode", surface: "gate", gate_workspace: "/g",
       model: "m", prompt: "hi", native_session_id: null, interrupt_after_ms: 1500 });
@@ -150,10 +150,11 @@ test("a run and an account operation name their runtime and surface, and carry o
 test("an orchestrator's read-only turn carries its job, its worker, its grant and its prompt, and nothing the job says", async () => {
   await withSupervisor(() => ({ exit_code: 0 }), async (client, frames) => {
     await client.run({ runtime: "opencode", surface: "project", jobId: 9, projectId: "p", grantToken: "g",
-      workerId: "orchestrator-worker-1", prompt: "plan", model: "ignored", nativeSessionId: "ignored" });
+      workerId: "orchestrator-worker-1", prompt: "plan", systemPrompt: "You are the architect.", model: "ignored", nativeSessionId: "ignored" });
     const [{ request_id: _id, ...turn }] = frames;
+    // rc.143: the role's instructions travel apart from the message.
     assert.deepEqual(turn, { type: "runtime_run", runtime: "opencode", surface: "project", job_id: 9, project_id: "p",
-      grant_token: "g", prompt: "plan", worker_id: "orchestrator-worker-1" });
+      grant_token: "g", prompt: "plan", system_prompt: "You are the architect.", worker_id: "orchestrator-worker-1" });
   });
 });
 

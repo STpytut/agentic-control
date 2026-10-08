@@ -7,7 +7,7 @@ import { adapterFor } from "../operations/runtime-adapters.mjs";
 import { InfraError } from "./failure.mjs";
 import { waitForPoll } from "./poll-wait.mjs";
 import { redactError, runLeasedJob, runPollLoop, shutdownSignal } from "./worker-loop.mjs";
-import { buildExecutorPrompt, isOperatorResponse } from "./turn-prompts.mjs";
+import { buildExecutorPrompt, EXECUTOR_INSTRUCTIONS, isOperatorResponse } from "./turn-prompts.mjs";
 
 const defaultWorkerId = process.env.RUNTIME_SUPERVISOR_ID ?? "vps-runtime-supervisor-1";
 
@@ -68,6 +68,9 @@ function buildTerminalRepairPrompt() {
   return [
     "Your implementation turn ended without the required terminal control-plane report.",
     "Do not repeat the implementation and do not respond with ordinary prose.",
+    // rc.143: the role's standing rules (run checks, commit) reach this run too,
+    // as its system prompt; the checks were run in the turn that ended.
+    "Do not re-run the checks. If your changes are not committed yet, commit them as the instructions say.",
     "Inspect the current workspace state and call exactly one terminal control-plane tool now:",
     "complete_task if the requested changes and checks are complete, report_blocker if they cannot be completed,",
     "or request_user_input only when operator input is genuinely required.",
@@ -125,7 +128,7 @@ async function executeJob(job, { workerId, lease, signal = null }) {
         return await supervisor.run({
           runtime: driver.name, surface: "task",
           jobId: job.id, runId: start.run_id, projectId: context.project_id, fencingToken: start.fencing_token,
-          grantToken: await freshGrantToken(), model: context.model, ...fields,
+          grantToken: await freshGrantToken(), model: context.model, systemPrompt: EXECUTOR_INSTRUCTIONS, ...fields,
         });
       } catch (error) {
         if (error?.code !== "runtime_capacity" || Date.now() + capacityRetryMs > waitUntil) throw error;

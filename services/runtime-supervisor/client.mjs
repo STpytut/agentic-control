@@ -367,15 +367,17 @@ export class RuntimeSupervisorClient extends EventEmitter {
   // A run the supervisor drives to its end: an executor's task in its fenced
   // workspace, or a gate's smoke run in a scratch one. Replaces runOpenCode and
   // runOpenCodeGate.
+  // `systemPrompt` (rc.143): the role's instructions, apart from the message;
+  // the driver says where they go. Not for a gate's smoke run.
   async run({ runtime, surface, jobId, runId, projectId, fencingToken, grantToken, gateWorkspace, prompt, model,
-    nativeSessionId = null, terminalReportSessionId = null, interruptAfterMs = null, workerId = null }) {
+    nativeSessionId = null, terminalReportSessionId = null, interruptAfterMs = null, workerId = null, systemPrompt = null }) {
     const spec = surfaceFor(runtime, surface, "batch");
     // An orchestrator's read-only turn (11.2 N4): the job and the worker that
     // leases it, and the prompt. The supervisor reads the rest from the job.
     const message = spec.workspace === "snapshot"
-      ? { job_id: jobId, prompt, worker_id: workerId }
+      ? { job_id: jobId, prompt, system_prompt: systemPrompt, worker_id: workerId }
       : spec.workspace === "grant" && spec.grantMode === "read_only"
-      ? { job_id: jobId, project_id: projectId, grant_token: grantToken, prompt, worker_id: workerId }
+      ? { job_id: jobId, project_id: projectId, grant_token: grantToken, prompt, system_prompt: systemPrompt, worker_id: workerId }
       : spec.workspace === "grant"
       ? {
         job_id: jobId,
@@ -384,6 +386,7 @@ export class RuntimeSupervisorClient extends EventEmitter {
         fencing_token: fencingToken,
         grant_token: grantToken,
         prompt,
+        system_prompt: systemPrompt,
         model,
         native_session_id: nativeSessionId,
         terminal_report_session_id: terminalReportSessionId,
