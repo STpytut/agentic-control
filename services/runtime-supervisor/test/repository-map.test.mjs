@@ -59,6 +59,7 @@ test("a repository's map names its commit, layout, languages, manifests, README 
   assert.doesNotMatch(map.tree, /left-pad/);
   assert.doesNotMatch(map.tree, /uncommitted/, "the map is the commit, not the working tree");
   assert.match(map.tree, /^apps\/web\/ \(1 file\)$/m, "a directory holding only a directory reads as one path");
+  assert.equal(map.tree_truncated, false);
   const root = map.manifests.find((entry) => entry.path === "package.json");
   assert.match(root.summary, /name: focus-timer/);
   assert.match(root.summary, /test: vitest run/);
@@ -100,7 +101,8 @@ test("names cannot break a line, binary and oversized files are not read, and a 
 test("a large tree is rendered as deep as the budget allows", () => {
   const paths = [];
   for (let a = 0; a < 30; a += 1) for (let b = 0; b < 30; b += 1) paths.push(`pkg${a}/mod${b}/file.ts`);
-  const { tree, depth } = renderTree(paths);
+  const { tree, depth, truncated } = renderTree(paths);
+  assert.equal(truncated, true, "directories left unexpanded are said to be");
   assert.ok(tree.split("\n").length <= 140);
   assert.ok(tree.length <= 6000);
   assert.equal(depth, 0);
@@ -131,4 +133,10 @@ test("package.json summaries survive what a repository may hold", () => {
 test("an excerpt ends on a whole line", () => {
   assert.equal(excerpt("one\ntwo\nthree\n", 100), "one\ntwo\nthree");
   assert.equal(excerpt("line one here\nline two here\n", 20), "line one here\n…");
+});
+
+test("a cut inside an emoji leaves no half character", () => {
+  const cutReadme = excerpt(`${"a".repeat(19)}\u{1F600}rest`, 20);
+  assert.ok(cutReadme.isWellFormed());
+  assert.ok(summarizePackageJson(JSON.stringify({ description: `${"d".repeat(199)}\u{1F600}` })).isWellFormed());
 });

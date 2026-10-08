@@ -53,10 +53,10 @@ BEGIN
 
   -- The orchestrator: the map, the check, and the earlier tasks that were
   -- implemented — not this one, not one never implemented, not another project's.
-  SET LOCAL session_replication_role = replica;
   INSERT INTO tasks(project_id,title,objective,status,created_by) VALUES(v_project,'This chat','x','planning','test') RETURNING id INTO v_task;
   INSERT INTO tasks(project_id,title,objective,status,created_by) VALUES(v_project,'Pause button','x','approved','test') RETURNING id INTO v_done;
   INSERT INTO tasks(project_id,title,objective,status,created_by) VALUES(v_project,'Only talked','x','cancelled','test') RETURNING id INTO v_plain;
+  SET LOCAL session_replication_role = replica;
   INSERT INTO agents(name, runtime_profile_id) VALUES ('map-probe', gen_random_uuid()) RETURNING id INTO v_agent;
   INSERT INTO task_runs(task_id, agent_id, phase) VALUES (v_done, v_agent, 'implementation') RETURNING id INTO v_run;
   INSERT INTO review_evidence(project_id,task_id,run_id,fencing_token,base_commit_sha,head_commit_sha,

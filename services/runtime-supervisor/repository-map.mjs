@@ -56,7 +56,9 @@ const INSTRUCTION_FILES = ["AGENTS.md", "CLAUDE.md", "GEMINI.md", ".cursorrules"
 const clean = (value) => String(value).replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "");
 // A name on one line: a path or a branch may hold a newline.
 const cleanName = (value) => String(value).replace(/[\u0000-\u001f\u007f]/g, "?");
-const cut = (value, limit) => (value.length > limit ? `${value.slice(0, limit).trimEnd()}…` : value);
+// A cut never ends inside a character: half a surrogate pair is JSON that
+// jsonb refuses, and the whole map would be dropped.
+const cut = (value, limit) => (value.length > limit ? `${value.slice(0, limit).toWellFormed().trimEnd()}…` : value);
 
 export function languageOf(file) {
   const name = file.slice(file.lastIndexOf("/") + 1);
@@ -126,6 +128,7 @@ function renderNode(node, depth, maxDepth, indent, lines) {
     const collapsed = COLLAPSED.has(label.split("/").at(-1));
     lines.push(`${indent}${label}/ (${fileNoun(target.count)}${collapsed ? ", not listed" : ""})`);
     if (!collapsed && depth < maxDepth) renderNode(target, depth + 1, maxDepth, `${indent}  `, lines);
+    else if (!collapsed) lines.unexpanded = true;
   }
   if (node.files.length) lines.push(namesLine(node.files, indent));
 }
@@ -139,7 +142,7 @@ export function renderTree(paths) {
     const lines = [];
     renderNode(root, 0, maxDepth, "", lines);
     const rendered = lines.join("\n");
-    if (lines.length <= LIMITS.treeLines && rendered.length <= LIMITS.treeChars) return { tree: rendered, depth: maxDepth, truncated: false };
+    if (lines.length <= LIMITS.treeLines && rendered.length <= LIMITS.treeChars) return { tree: rendered, depth: maxDepth, truncated: Boolean(lines.unexpanded) };
     fallback = lines;
   }
   return { tree: cut(fallback.slice(0, LIMITS.treeLines).join("\n"), LIMITS.treeChars), depth: 0, truncated: true };
@@ -178,7 +181,7 @@ export function summarizePackageJson(source, { nested = false } = {}) {
 export function excerpt(source, limit) {
   const body = clean(source).replace(/^\s*\n/, "").trimEnd();
   if (body.length <= limit) return body;
-  const head = body.slice(0, limit);
+  const head = body.slice(0, limit).toWellFormed();
   const lineEnd = head.lastIndexOf("\n");
   return `${(lineEnd > limit / 2 ? head.slice(0, lineEnd) : head).trimEnd()}\n…`;
 }

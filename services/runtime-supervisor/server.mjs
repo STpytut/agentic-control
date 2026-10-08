@@ -673,8 +673,10 @@ async function refreshRepositoryMap(projectId, account, workspace, source) {
   try {
     const map = await buildRepositoryMap({ runGit: gitAs(account, workspace) });
     if (!map) return;
+    const serialized = JSON.stringify(map);
+    if (!serialized.isWellFormed()) throw new Error("the map is not well-formed Unicode");
     await queryJson(`SELECT record_repository_map(:'project_id'::uuid,:'source',:'map'::jsonb)::text;`,
-      { project_id: projectId, source, map: JSON.stringify(map) });
+      { project_id: projectId, source, map: serialized });
   } catch (error) {
     process.stderr.write(`${JSON.stringify({ type: "repository_map.failed", project_id: projectId, source, error: String(error?.message ?? error).slice(0, 300) })}\n`);
   }
