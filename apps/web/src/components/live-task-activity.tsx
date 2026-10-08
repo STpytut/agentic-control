@@ -1,10 +1,10 @@
 "use client";
 
+import { RuntimeMark } from "@/components/runtime-mark";
 import { controlPlaneActionHeaders } from "@/lib/csrf-client";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import type { TaskActivity } from "@/lib/product-data";
-import { runtimeLabel } from "@/lib/runtime-labels";
 import { Badge, cx } from "@agentic/design-system";
 import { dangerOutlineClasses } from "@/components/ui/danger-button";
 
@@ -41,11 +41,14 @@ function heartbeatAge(activity: TaskActivity, now: number) {
   return Math.max(0,Math.floor((now-new Date(activity.heartbeatAt).getTime())/1000));
 }
 
-export function LiveTaskActivity({ projectId, taskId, initialActivity, awaitingResponse }: {
+export function LiveTaskActivity({ projectId, taskId, initialActivity, awaitingResponse, modelLabel = (model) => model }: {
   projectId: string;
   taskId: string;
   initialActivity: TaskActivity | null;
   awaitingResponse: boolean;
+  // The catalogue's name for a model ("Claude Sonnet (latest)"), as the chat's
+  // messages show it, not the runtime's id ("sonnet").
+  modelLabel?: (model?: string) => string | undefined;
 }) {
   const router = useRouter();
   const [activity,setActivity] = useState(initialActivity);
@@ -124,9 +127,9 @@ export function LiveTaskActivity({ projectId, taskId, initialActivity, awaitingR
   if (!shouldShow) return null;
   const tone = failed ? "failed" : stalled ? "stalled" : "active";
   return <article className={cx("mb-6 grid grid-cols-[32px_minmax(0,1fr)] gap-3 rounded-lg border p-3.5", tone === "failed" ? "border-danger/50" : tone === "stalled" ? "border-warning/50" : "border-line-strong")} aria-live="polite">
-    <span className="grid h-8 w-8 place-items-center rounded-sm bg-ink text-[0.75rem] font-medium text-on-ink">{runtimeLabel(activity?.runtimeType || "?").charAt(0).toUpperCase()}</span>
+    <RuntimeMark runtime={activity?.runtimeType} fallback={activity?.agentName ?? "?"}/>
     <div className="min-w-0">
-      <header className="flex items-center justify-between gap-3"><span className="flex min-w-0 items-baseline gap-1.5"><strong className="type-meta font-medium">{activity?.agentName ?? "Orchestrator"}</strong><small className="type-mono-small truncate text-muted">{activity?.model ?? "Waiting for assignment"}</small></span><Badge tone={tone === "failed" ? "danger" : tone === "stalled" ? "warning" : "active"} className="shrink-0">{phase}</Badge></header>
+      <header className="flex items-center justify-between gap-3"><span className="flex min-w-0 items-baseline gap-1.5"><strong className="type-meta font-medium">{activity?.agentName ?? "Orchestrator"}</strong><small className="type-mono-small truncate text-muted">{(activity?.model && modelLabel(activity.model)) ?? "Waiting for assignment"}</small></span><Badge tone={tone === "failed" ? "danger" : tone === "stalled" ? "warning" : "active"} className="shrink-0">{phase}</Badge></header>
       <p className="type-app-body mt-2 mb-2.5 text-ink/80">{activity?.detail ?? "Your message is durable and waiting to be routed to the agent."}</p>
       {!!activity?.events?.length && <ul className="type-meta mb-2.5 grid list-none gap-0.5 p-0 text-muted">{activity.events.slice(0,3).map((event) => <li key={event.id} className="before:mr-1.5 before:content-['›']">{event.summary}</li>)}</ul>}
       {interruptError && <p className="type-mono-small mb-2 text-danger">{interruptError}</p>}

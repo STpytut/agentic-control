@@ -172,7 +172,7 @@ export function ChatView({ operator, workspace, activeTask, writeEnabled, view, 
                   <p className="type-app-body mt-1.5 text-ink/80">{action.description}</p>
                   <WorkflowActions action={action} acceptanceCriteria={activeTask.acceptanceCriteria}/>
                 </article>)}
-                <LiveTaskActivity projectId={project.id} taskId={activeTask.id} initialActivity={workspace.taskActivity} awaitingResponse={messages.at(-1)?.role === "user"}/>
+                <LiveTaskActivity projectId={project.id} taskId={activeTask.id} initialActivity={workspace.taskActivity} awaitingResponse={messages.at(-1)?.role === "user"} modelLabel={modelLabel}/>
               </ChatScrollArea>
               {/* The host-wide banner stays only where the project's own reading is
                   not available: with it, the composer names the assignment and the

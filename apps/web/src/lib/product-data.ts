@@ -118,6 +118,8 @@ export type ChatMessage = {
   actorRole?: "orchestrator" | "reviewer" | "executor" | "analyst";
   // The model the message was written with, as the runtime recorded it.
   model?: string;
+  // The runtime that wrote it, for its mark beside the name.
+  runtime?: string;
   // A workflow record the operator should not miss (a run that ended without
   // its report, a job that stopped for good) rather than a step of the routine.
   notice?: boolean;
@@ -521,12 +523,17 @@ function contentForEvent(event: EventSummary, task?: TaskSummary, sides: Sides =
 // conversation: the answer is usually typed into this chat (0061 routes it), and
 // showing only "your answer was recorded" made the message the operator just
 // sent disappear. A question marked sensitive keeps its answer out of the chat.
+function runtimeOf(event: EventSummary, side: "from" | "to") {
+  const value = ((event.actors ?? {}) as Json)[`${side}_runtime`];
+  return typeof value === "string" && value ? value : undefined;
+}
+
 function interactionMessage(event: EventSummary, sensitive: boolean): ChatMessage | null {
   const payload = event.payload as Record<string, unknown>;
   const base = { id: event.id, occurredAt: event.occurredAt, eventType: event.eventType };
   if (event.eventType === "run.input_requested" && typeof payload.question === "string") {
     const context = typeof payload.context === "string" && payload.context.trim() ? `\n\n${payload.context}` : "";
-    return { ...base, role: "agent", author: actorName(event, "to", "The executor"), actorRole: "executor", content: `${payload.question}${context}` };
+    return { ...base, role: "agent", author: actorName(event, "to", "The executor"), actorRole: "executor", runtime: runtimeOf(event, "to"), content: `${payload.question}${context}` };
   }
   // An implementation that ended without its report (0066): the question it
   // opens for the operator, said by the control plane.
@@ -545,7 +552,7 @@ function interactionMessage(event: EventSummary, sensitive: boolean): ChatMessag
   }
   if (event.eventType === "implementation.blocked" && typeof payload.reason === "string") {
     const action = typeof payload.requested_action === "string" && payload.requested_action.trim() ? `\n\n${payload.requested_action}` : "";
-    return { ...base, role: "agent", author: actorName(event, "to", "The executor"), actorRole: "executor", content: `Blocked: ${payload.reason}${action}` };
+    return { ...base, role: "agent", author: actorName(event, "to", "The executor"), actorRole: "executor", runtime: runtimeOf(event, "to"), content: `Blocked: ${payload.reason}${action}` };
   }
   // Stage 12 (0147): the orchestrator's question to an analyst, and the
   // analyst's answer as its own message, with the model that wrote it.
@@ -554,6 +561,7 @@ function interactionMessage(event: EventSummary, sensitive: boolean): ChatMessag
   }
   if (event.eventType === "consultation.answered" && typeof payload.answer === "string") {
     return { ...base, role: "agent", author: String(payload.analyst ?? "Analyst"), actorRole: "analyst",
+      ...(typeof payload.runtime_type === "string" ? { runtime: payload.runtime_type } : {}),
       ...(typeof payload.model === "string" && payload.model ? { model: payload.model } : {}), content: payload.answer };
   }
   if (event.eventType === "consultation.failed") {
@@ -606,6 +614,7 @@ function messageFromEvent(event: EventSummary, task: TaskSummary | undefined, si
     // Every agent message is the orchestrator's (0077); the turn that resumes it
     // after an implementation is its review (orchestrator-worker REVIEW_JOB_TYPES).
     ...(isAgent ? {
+      ...(typeof payload.runtime_type === "string" ? { runtime: payload.runtime_type } : {}),
       actorRole: payload.source_job_type === "resume_orchestrator" ? "reviewer" as const : "orchestrator" as const,
       ...(event.selectedModel ? { model: event.selectedModel } : {}),
     } : {}),

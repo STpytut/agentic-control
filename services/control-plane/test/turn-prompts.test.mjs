@@ -315,6 +315,11 @@ test("the orchestrator is told its analysts, and nothing when there are none", (
   const text = describeAnalysts([{ name: "Security reviewer", model: "Claude Haiku", instructions: "Look\nfor injection." }]);
   assert.match(text, /platform\.consult\(\{member, question\}\)/);
   assert.match(text, /- Security reviewer \(Claude Haiku\): Look for injection\./);
+  // rc.135: the orchestrator asked, read "asked" as no answer, asked again and
+  // delegated before the answer came. It is told the answer comes after the turn.
+  assert.match(text, /the answer cannot reach you in this turn/);
+  assert.match(text, /consult, then end your turn/);
+  assert.match(text, /Ask each question once/);
 });
 
 test("an analyst's answer reaches the orchestrator as evidence, and a failure says so", () => {

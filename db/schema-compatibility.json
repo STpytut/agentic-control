@@ -372,6 +372,10 @@
     "0147_analysts.sql": {
       "previousReleaseCompatible": true,
       "note": "Adds project_analysts, consultations and their functions, the analyst role in the runtime mirror, the consultation_run job type, and recreates route_outbox_message and claim_orchestrator_jobs with the consultation's events; the previous release neither asks nor answers consultations and routes every event it knew as before."
+    },
+    "0148_consult_once_per_turn.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Recreates invoke_consult with the same signature and grants; a second ask of the same analyst from the same turn returns the open consultation instead of starting another."
     }
   }
 }

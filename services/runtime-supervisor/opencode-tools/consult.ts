@@ -29,7 +29,7 @@ function submit(message: object): Promise<string> {
 }
 
 export default tool({
-  description: "Ask one of the project's analysts to read the code and answer a question. The answer arrives later as a new message; this call only asks.",
+  description: "Send a question to one of the project's analysts, who reads the code and answers. This call returns at once with status 'asked'; the answer arrives as a new message after your turn ends. If your plan depends on it, end your turn now and plan when it arrives. Never ask the same question twice.",
   args: {
     member: tool.schema.string().optional().describe("The analyst's name; may be left out when the project has exactly one"),
     question: tool.schema.string().min(10).max(8000).describe("What the analyst should find out, and what to report"),

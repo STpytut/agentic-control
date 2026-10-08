@@ -126,10 +126,21 @@ BEGIN
      OR (SELECT count(*) FROM consultations WHERE task_id=v_task) <> 1 THEN
     RAISE EXCEPTION 'consult: %', v_result;
   END IF;
-  PERFORM invoke_consult(v_job, 'turn-worker', 'call-2', 'security reviewer', 'A second question, by its name in another case.');
-  PERFORM invoke_consult(v_job, 'turn-worker', 'call-3', '', 'A third question to the only analyst.');
+  -- 0148: asked again from the same turn while the answer is on the way: the
+  -- question already asked, not a second run.
+  v_result := invoke_consult(v_job, 'turn-worker', 'call-2', 'security reviewer', 'Please return the requested trace now.');
+  IF v_result->>'status' <> 'already_asked' OR (v_result->>'consultation_id')::uuid <> v_consultation
+     OR (SELECT count(*) FROM consultations WHERE task_id=v_task) <> 1 THEN
+    RAISE EXCEPTION 'a second ask from the same turn started another run: %', v_result;
+  END IF;
+  -- Three open at once for a task, from whichever turns asked.
+  INSERT INTO consultations(project_id, task_id, analyst_id, question, requested_by_job, call_id)
+  VALUES (v_project, v_task, v_analyst, 'An earlier turn''s question.', -1, 'x1'),
+         (v_project, v_task, v_analyst, 'Another earlier turn''s question.', -2, 'x2');
+  UPDATE consultations SET requested_by_job=-3 WHERE id=v_consultation;
   v_reason := pg_temp.reason_of(format($q$SELECT invoke_consult(%s,'turn-worker','call-4','','A fourth question while three wait.')$q$, v_job));
   IF v_reason IS DISTINCT FROM 'consultation_limit' THEN RAISE EXCEPTION 'a fourth open consultation was taken: %', v_reason; END IF;
+  UPDATE consultations SET requested_by_job=v_job WHERE id=v_consultation;
 
   -- The event becomes a consultation_run job.
   SELECT o.id INTO v_message FROM outbox_messages o JOIN domain_events e ON e.id=o.event_id
@@ -170,15 +181,17 @@ BEGIN
     RAISE EXCEPTION 'a consultation turn moved the task to %', (SELECT status FROM tasks WHERE id=v_task);
   END IF;
 
-  -- A run with no answer is a failure the orchestrator is told of.
-  SELECT * INTO v_run_job FROM runtime_jobs WHERE job_type='consultation_run' AND task_id=v_task AND status='pending' LIMIT 1;
-  IF v_run_job.id IS NULL THEN
-    -- The second question's event, routed now.
-    SELECT o.id INTO v_message FROM outbox_messages o JOIN domain_events e ON e.id=o.event_id
-    WHERE e.event_type='consultation.requested' AND e.task_id=v_task AND o.status='pending' LIMIT 1;
-    UPDATE outbox_messages SET status='in_flight', leased_by='dispatcher-test', leased_until=clock_timestamp()+interval '1 minute' WHERE id=v_message;
-    PERFORM route_outbox_message(v_message, 'dispatcher-test');
-  END IF;
+  -- A run with no answer is a failure the orchestrator is told of: an earlier
+  -- turn's question, its job made here.
+  SET LOCAL session_replication_role = replica;
+  INSERT INTO domain_events(event_type,project_id,task_id,conversation_id,conversation_sequence,actor_type,actor_id,correlation_id,aggregate_type,aggregate_id,aggregate_version,payload)
+    VALUES('consultation.requested',v_project,v_task,(SELECT conversation_id FROM tasks WHERE id=v_task),9100,'agent','orchestrator','consult-test',
+      'consultation',(SELECT id FROM consultations WHERE call_id='x1'),1,
+      jsonb_build_object('consultation_id',(SELECT id FROM consultations WHERE call_id='x1'))) RETURNING id INTO v_event;
+  INSERT INTO runtime_jobs(source_event_id,job_type,project_id,task_id,payload)
+    VALUES(v_event,'consultation_run',v_project,v_task,
+      jsonb_build_object('event_type','consultation.requested','event_payload',jsonb_build_object('consultation_id',(SELECT id FROM consultations WHERE call_id='x1'))));
+  SET LOCAL session_replication_role = origin;
   SELECT * INTO v_run_job FROM claim_consultation_jobs('consult-worker');
   PERFORM finish_consultation(v_run_job.id, 'consult-worker', '{"status":"answered","answer":"   "}');
   IF (SELECT status FROM runtime_jobs WHERE id=v_run_job.id) <> 'completed'

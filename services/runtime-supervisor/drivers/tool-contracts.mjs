@@ -46,7 +46,7 @@ export const PLATFORM_COMMAND_TOOLS = Object.freeze([
   // is not this call's result: it arrives later as a new turn.
   Object.freeze({
     name: "consult",
-    description: "Ask one of the project's analysts to read the code and answer a question. The answer arrives later as a new message; this call only asks.",
+    description: "Send a question to one of the project's analysts, who reads the code and answers. This call returns at once with status 'asked'; the answer arrives as a new message after your turn ends. If your plan depends on it, end your turn now and plan when it arrives. Never ask the same question twice.",
     inputSchema: {
       type: "object",
       properties: {
@@ -58,6 +58,10 @@ export const PLATFORM_COMMAND_TOOLS = Object.freeze([
     },
   }),
 ]);
+
+// What a consult's receipt says next (0147): the model that called it read the
+// receipt as the answer missing and asked again five seconds later (rc.135).
+export const CONSULT_NEXT = "Asked. The answer is not in this result: it arrives as a new message after your turn ends. If the plan depends on it, end your turn now and tell the operator you are waiting for the analyst. Do not ask this question again.";
 
 // The names the orchestrator's run socket accepts (11.2 N4): a runtime whose
 // tools are files calls these over the socket, as the executor calls its own.

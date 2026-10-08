@@ -37,6 +37,7 @@ import { githubWorkspaceAction, isPublishAction, isSyncAction } from "./github-w
 import { applyWorkspaceSync } from "./workspace-sync.mjs";
 import { buildRepositoryMap } from "./repository-map.mjs";
 import { buildSnapshot } from "./snapshot.mjs";
+import { CONSULT_NEXT } from "./drivers/tool-contracts.mjs";
 import { exportApprovedCommit } from "./publish-export.mjs";
 import { startMailbox } from "./run-mailbox.mjs";
 import { ensureRunToolRoot, openRunToolSocket, sweepRunToolSockets } from "./worker-tool-socket.mjs";
@@ -2653,10 +2654,10 @@ async function runReadOnlyBatch(request, driver, control = new LaunchControl()) 
       }
       if (toolRequest.type === "consult") {
         if (typeof args.question !== "string" || args.question.trim().length < 10) throw new Error("consult needs a question");
-        return await queryJson(`SELECT invoke_consult(:'job_id'::bigint, :'worker_id', :'call_id', :'member', :'question')::text;`, {
+        return { ...await queryJson(`SELECT invoke_consult(:'job_id'::bigint, :'worker_id', :'call_id', :'member', :'question')::text;`, {
           job_id: request.job_id, worker_id: workerId, call_id: toolRequest.call_id,
           member: typeof args.member === "string" ? args.member : "", question: args.question,
-        });
+        }), next: CONSULT_NEXT };
       }
       if (toolRequest.type !== "request_revision") throw new Error(`unsupported platform command: ${toolRequest.type}`);
       if (!strings(args.changes_required, { nonEmpty: true })) throw new Error("request_revision needs changes_required");

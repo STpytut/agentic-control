@@ -1,5 +1,6 @@
 "use client";
 
+import { RuntimeMark } from "@/components/runtime-mark";
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -50,7 +51,7 @@ export function ChatMessage({ message, timeLabel, modelLabel }: { message: ChatM
   const detail = [message.actorRole && ROLE_LABELS[message.actorRole], modelLabel].filter(Boolean).join(" · ");
 
   return <article className="mb-6 grid grid-cols-[32px_minmax(0,1fr)] gap-3">
-    <span className="grid h-8 w-8 place-items-center rounded-sm bg-ink text-[0.6875rem] font-medium text-on-ink">{(message.author.trim()[0] ?? "A").toUpperCase()}</span>
+    <RuntimeMark runtime={message.runtime} fallback={message.author}/>
     <div className="min-w-0">
       <header className="flex min-h-6 flex-wrap items-center gap-x-2"><strong className="type-meta font-medium">{message.author}</strong>{detail && <span className="type-meta text-muted">{detail}</span>}<time className="type-meta text-muted">{timeLabel}</time></header>
       <div className="message-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown></div>
