@@ -77,6 +77,31 @@ export function normalizeClaudeEvent(event) {
   if (event.type === "system" && event.subtype === "init") return {
     eventType: "runtime.turn.started", phase: "running_turn", summary: "Claude Code started the turn", details: {},
   };
+  // rc.144: the platform's policy hook refused a tool call. Only a refusal is
+  // an activity; every other hook event is the hook doing nothing.
+  if (event.type === "system" && event.subtype === "hook_response" && event.hook_event === "PreToolUse") {
+    // A hook that did not run is not a deny to Claude Code: the call went on
+    // unchecked, and the feed says so.
+    const exit = typeof event.exit_code === "number" ? event.exit_code : null;
+    if ((exit !== null && exit !== 0 && exit !== 2) || (typeof event.outcome === "string" && !["success", "blocked"].includes(event.outcome))) {
+      return {
+        eventType: "runtime.policy.failed", phase: "running_turn",
+        summary: `The platform's policy check did not run: ${String(event.stderr ?? event.output ?? "").trim().split("\n")[0].slice(0, 160) || "no reason given"}`,
+        details: cleanDetails({ tool: String(event.hook_name ?? "").replace(/^PreToolUse:/, "") || undefined, status: "failed" }),
+      };
+    }
+    let answer = null;
+    try { answer = JSON.parse(String(event.stdout ?? "")); } catch {}
+    const decision = answer?.hookSpecificOutput;
+    if (decision?.permissionDecision !== "deny") return null;
+    const tool = String(event.hook_name ?? "").replace(/^PreToolUse:/, "").slice(0, 80) || undefined;
+    const reason = String(decision.permissionDecisionReason ?? "").slice(0, 200);
+    return {
+      eventType: "runtime.policy.refused", phase: "running_turn",
+      summary: `Platform policy refused ${tool ?? "a tool call"}: ${reason || "no reason given"}`,
+      details: cleanDetails({ tool, reason: reason || undefined, status: "refused" }),
+    };
+  }
   // rc.142: the member's model was overloaded or not available and the run
   // went on with its fallback (`--fallback-model`); 2.1.294 says so with
   // `system`/`model_fallback`, naming both. The usage row takes the model that
