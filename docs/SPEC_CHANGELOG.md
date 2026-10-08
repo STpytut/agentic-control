@@ -1,5 +1,9 @@
 # Spec Changelog
 
+## 2026-10-08 — the approved commit is published after the workspace moved on (rc.140)
+
+- **A publish pushes the approved commit even when the next task has committed on top of it** (migration 0150). One workspace holds a project's tasks in turn, and on rc.139 an approval that came after the next task's commit was refused (`review_evidence_digest_moved`) while the next task's pull request carried both. A commit id names its tree and history, so the preparation now accepts a moved workspace when the review saw the work committed, the base is the same, and the workspace's HEAD still contains the approved commit (asked of git as the workspace's owner). The export packs that commit rather than requiring HEAD to be it. A workspace that no longer contains the commit is still refused, naming its ref.
+
 ## 2026-10-08 — delegating after the analyst's answer (rc.139)
 
 - **The turn that brings an analyst's answer may delegate** (migration 0149). rc.136's orchestrator waited for the answer its plan needed, planned in the answer's turn, and was refused: `invoke_delegate_task` took only a conversation turn. A `resume_orchestrator` turn brought by `consultation.answered` or `consultation.failed` now delegates as a conversation turn does; a review's resume still does not.

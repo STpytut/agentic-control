@@ -478,9 +478,23 @@ test("a pull request already open for the branch is the answer, not a second one
   assert.equal(github.pulls.length, 1);
 });
 
-test("a workspace whose HEAD moved since prepare is refused, naming the ref and where it is", { skip }, async () => {
+// 0150: the next task's commit on top of the approved one is not a reason to
+// refuse it — the approved commit, named by its id, is what is pushed.
+test("a workspace that moved on past the approved commit publishes that commit", { skip }, async () => {
   const repos = repositories();
   const f = fixture(repos.head);
+  commit(repos.workspace, "next-task.txt", "the next task\n");
+  await request(f);
+  const intent = await claim();
+  const { result } = await publish(intent, repos.workspace, tokens());
+  assert.equal(result.status, "published");
+  assert.equal(git(repos.remote, "rev-parse", `refs/heads/infra-cod/${f.task}`), repos.head, "the branch is the approved commit");
+});
+
+test("a workspace that no longer holds the approved commit is refused, naming the ref and where it is", { skip }, async () => {
+  const repos = repositories();
+  const f = fixture(repos.head);
+  git(repos.workspace, "reset", "-q", "--hard", repos.base);
   const moved = commit(repos.workspace, "later.txt", "later\n");
   await request(f);
   const intent = await claim();
