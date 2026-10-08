@@ -9,7 +9,7 @@ import { DeliveryOutcomeUnknown, startMailbox } from "../runtime-supervisor/run-
 import { launchProvenance } from "../runtime-supervisor/provenance.mjs";
 import { launchReasoningLevel } from "../runtime-supervisor/drivers/reasoning.mjs";
 import { runLeasedJob, runPollLoop, shutdownSignal } from "./worker-loop.mjs";
-import { describeOperatorChangeRequests, describeReviewEvidence, ORCHESTRATOR_INSTRUCTIONS, workflowUpdates } from "./turn-prompts.mjs";
+import { describeOperatorChangeRequests, describeRepositoryContext, describeReviewEvidence, ORCHESTRATOR_INSTRUCTIONS, workflowUpdates } from "./turn-prompts.mjs";
 
 // A review turn under either name until 11.2 N6 (migration 0073).
 const REVIEW_JOB_TYPES = new Set(["resume_orchestrator"]);
@@ -163,7 +163,23 @@ async function turnPreamble(job, context, workerId) {
       { job_id: job.id, worker_id: workerId },
     ))
     : "";
-  return [updates, evidence].filter(Boolean).join("\n");
+  return [await repositoryBriefing(job, context, workerId), updates, evidence].filter(Boolean).join("\n");
+}
+
+// The project briefing (0146), for a session's first turn only: a resumed
+// session has it in its history already. Never required — a turn without it
+// explores, as every turn did before.
+async function repositoryBriefing(job, context, workerId) {
+  if (context.native_session_id) return "";
+  try {
+    return describeRepositoryContext(await queryJson(
+      `SELECT orchestrator_repository_context(:'job_id'::bigint, :'worker_id')::text;`,
+      { job_id: job.id, worker_id: workerId },
+    ));
+  } catch (error) {
+    process.stderr.write(`${JSON.stringify({ type: "orchestrator.briefing_failed", jobId: job.id, error: error.message })}\n`);
+    return "";
+  }
 }
 
 // A turn on a runtime whose project surface is a batch (11.2 N4): one run in

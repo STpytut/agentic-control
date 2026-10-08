@@ -688,6 +688,10 @@ INSERT INTO infra_web_allowlist(signature) VALUES
   -- functions are not granted.
   ('request_workspace_sync(p_project_id uuid, p_owner_id uuid, p_mode text)'),
   ('get_workspace_sync(p_project_id uuid, p_owner_id uuid)'),
+  -- 0146: the project's repository map for the Workspace page, owner-only
+  -- (checked by the function). Recording a map and the orchestrator's read
+  -- are the worker's, and not granted.
+  ('get_repository_map(p_project_id uuid, p_owner_id uuid)'),
   -- 0088 (sprint C U1): read-only. The four readiness states of every
   -- assignment of a project, checking the owner itself; it reads
   -- provider_connections, which infra_web may not, so it is SECURITY DEFINER.

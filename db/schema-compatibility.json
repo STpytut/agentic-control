@@ -364,6 +364,10 @@
     "0145_workspace_sync.sql": {
       "previousReleaseCompatible": true,
       "note": "Adds workspace_syncs, its functions and an AFTER INSERT trigger on tasks that only queues a sync; the previous release neither claims nor reads syncs, so queued ones wait."
+    },
+    "0146_repository_maps.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds project_repository_maps and three functions (record, orchestrator context, panel read); the previous release neither writes nor reads maps."
     }
   }
 }
