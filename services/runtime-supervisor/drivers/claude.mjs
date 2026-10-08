@@ -69,6 +69,11 @@ const SURFACE_ARGS = Object.freeze({
     "--strict-mcp-config", "--permission-mode", "dontAsk",
   ],
   gate: () => ["--tools", "", "--disallowedTools", DENIED_READS, "--strict-mcp-config", "--permission-mode", "dontAsk"],
+  // An analyst's run (0147): the snapshot read, nothing called, nothing written.
+  consult: () => [
+    "--tools", READ_TOOLS, "--allowedTools", READ_TOOLS, "--disallowedTools", DENIED_READS,
+    "--strict-mcp-config", "--permission-mode", "dontAsk",
+  ],
   // An executor's run (Stage 12 X1): the workspace granted read-write, its
   // tools pre-approved and nothing else (`dontAsk`), its terminal reports as
   // MCP tools of the same bridge (INFRA_BRIDGE_TOOLS=reports in its environment).
@@ -227,6 +232,7 @@ export const claudeDriver = Object.freeze({
 
   surfaces: Object.freeze({
     project: Object.freeze({ transport: "batch", workspace: "grant", grantMode: "read_only", capability: "run.read_only" }),
+    consult: Object.freeze({ transport: "batch", workspace: "snapshot", capability: "run.read_only" }),
     gate: Object.freeze({ transport: "batch", workspace: "gate", capability: "gate.smoke" }),
     task: Object.freeze({ transport: "batch", workspace: "grant", grantMode: "read_write", capability: "run.workspace_write" }),
     // The sign-in from the panel (rc.123), in the runtime's own home.

@@ -238,7 +238,7 @@ test("the Codex driver's sessions, turns, interrupts and tools speak app-server"
   assert.equal(start, "thread/start");
   assert.equal("sandbox" in startParams, false, "the launch's permission profile is the sandbox");
   assert.equal(startParams.approvalPolicy, "never");
-  assert.deepEqual(startParams.dynamicTools[0].tools.map((tool) => tool.name), ["delegate_task", "request_revision"]);
+  assert.deepEqual(startParams.dynamicTools[0].tools.map((tool) => tool.name), ["delegate_task", "request_revision", "consult"]);
   const [resume, resumeParams] = codex.sessions.resume("thr_1", params);
   assert.equal(resume, "thread/resume");
   assert.equal(resumeParams.threadId, "thr_1");
@@ -359,7 +359,7 @@ test("OpenCode's project surface is a read-only batch whose run config denies wh
   const opencode = driverFor("opencode");
   assert.deepEqual(surfaceOf(opencode, "project"),
     { transport: "batch", workspace: "grant", grantMode: "read_only", capability: "run.read_only" });
-  assert.deepEqual(driverProblems(opencode, { roles: ["orchestrator", "executor"] }), []);
+  assert.deepEqual(driverProblems(opencode, { roles: ["orchestrator", "executor", "analyst"] }), []);
   const configOf = (environment) => JSON.parse(environment.find((entry) => entry.startsWith("OPENCODE_CONFIG_CONTENT="))
     ?.slice("OPENCODE_CONFIG_CONTENT=".length) ?? "null");
 
@@ -374,7 +374,7 @@ test("OpenCode's project surface is a read-only batch whose run config denies wh
   // bubblewrap mount: no sandbox shell there.
   assert.ok(!turn.some((entry) => entry.startsWith("SHELL=")));
   const implementation = opencode.run.environment({ surface: "task" });
-  assert.deepEqual(configOf(implementation), { permission: LOGIN_PERMISSION, tools: { delegate_task: false, request_revision: false } });
+  assert.deepEqual(configOf(implementation), { permission: LOGIN_PERMISSION, tools: { delegate_task: false, request_revision: false, consult: false } });
   assert.ok(!implementation.includes("OPENCODE_DISABLE_PROJECT_CONFIG=true"), "the executor's behaviour changed");
   // Stage 12 M0: every open shell runs in the sandbox shell, the login covered.
   for (const environment of [implementation, opencode.run.environment({ surface: "gate" }), opencode.run.environment()]) {
@@ -382,7 +382,7 @@ test("OpenCode's project surface is a read-only batch whose run config denies wh
     assert.ok(environment.includes("INFRA_COD_HIDDEN_STATE=.local/share/opencode:/home/opencode-worker/.local/share/opencode"));
   }
   assert.deepEqual(configOf(opencode.run.environment({ surface: "gate" })), { permission: LOGIN_PERMISSION });
-  assert.deepEqual(opencode.toolBridge.platformTools, ["delegate_task", "request_revision"]);
+  assert.deepEqual(opencode.toolBridge.platformTools, ["delegate_task", "request_revision", "consult"]);
   for (const path of ["/tmp", "/dev/null", ...adapterFor("opencode").writableState]) {
     assert.ok(opencode.run.readOnlyWritable.includes(path), `${path} is not writable in a turn`);
   }
@@ -433,16 +433,16 @@ const claudeStream = (name) => readFileSync(new URL(`./claude-streams/${name}`, 
 
 test("the Claude Code driver runs a turn read-only, with the platform's tools and nothing of the workspace's", () => {
   const claude = driverFor("claude");
-  assert.deepEqual(Object.keys(claude.surfaces).sort(), ["account", "gate", "project", "task"]);
+  assert.deepEqual(Object.keys(claude.surfaces).sort(), ["account", "consult", "gate", "project", "task"]);
   assert.equal(surfaceOf(claude, "project").grantMode, "read_only");
   // Stage 12 X1: an executor too, decision C2's reason closed by M0.
-  assert.deepEqual(adapterFor("claude").roles, ["orchestrator", "executor"]);
+  assert.deepEqual(adapterFor("claude").roles, ["orchestrator", "executor", "analyst"]);
 
   const argv = claude.run.argv({ model: "haiku", newSessionId: "11111111-1111-4111-8111-111111111111", prompt: "Plan it", surface: "project" });
   const after = (flag) => argv[argv.indexOf(flag) + 1];
   assert.equal(argv[0], "-p");
   assert.equal(after("--tools"), "Read,Glob,Grep", "Write, Edit and Bash are not offered at all");
-  assert.equal(after("--allowedTools"), "Read,Glob,Grep,mcp__platform__delegate_task,mcp__platform__request_revision");
+  assert.equal(after("--allowedTools"), "Read,Glob,Grep,mcp__platform__delegate_task,mcp__platform__request_revision,mcp__platform__consult");
   assert.equal(after("--permission-mode"), "dontAsk");
   assert.equal(after("--setting-sources"), "user", "the workspace's .claude settings and hooks do not apply");
   // rc.67 on the host: Read returned a canary beside the subscription's
@@ -639,4 +639,32 @@ test("Codex's writing run reads its exec events: the session, the answer, the fa
   assert.equal(codex.stream.parse(JSON.stringify({ method: "turn/started", params: {} })).event.eventType, "runtime.turn.started");
   assert.deepEqual(codex.run.environment({ surface: "task" }), ["INFRA_BRIDGE_TOOLS=reports"]);
   assert.deepEqual(codex.run.environment({ surface: "project" }), []);
+});
+
+// Stage 12 (0147): an analyst's run reads a snapshot and calls nothing.
+test("an analyst's consult surface is a read-only snapshot run with no tool of the platform's", () => {
+  for (const name of ["claude", "opencode"]) {
+    assert.deepEqual(surfaceOf(driverFor(name), "consult"), { transport: "batch", workspace: "snapshot", capability: "run.read_only" });
+    assert.ok(adapterFor(name).roles.includes("analyst"));
+    assert.ok(adapterFor(name).dispatch.jobTypes.includes("consultation_run"));
+  }
+  assert.ok(!adapterFor("codex").roles.includes("analyst"), "Codex is not an analyst until its read-only exec is qualified");
+
+  const claude = driverFor("claude");
+  const argv = claude.run.argv({ model: "haiku", prompt: "Read it", surface: "consult" });
+  const after = (flag) => argv[argv.indexOf(flag) + 1];
+  assert.equal(after("--tools"), "Read,Glob,Grep");
+  assert.equal(after("--allowedTools"), "Read,Glob,Grep", "no platform tool is allowed");
+  assert.equal(after("--disallowedTools"), "Read(~/.claude/**),Read(~/.claude.json)");
+  assert.ok(!argv.includes("--mcp-config"), "no bridge is started");
+  assert.deepEqual(claude.run.environment({ surface: "consult" }).filter((entry) => /SHELL|BRIDGE/.test(entry)), []);
+
+  const opencode = driverFor("opencode");
+  const environment = opencode.run.environment({ surface: "consult" });
+  const config = JSON.parse(environment.find((entry) => entry.startsWith("OPENCODE_CONFIG_CONTENT=")).slice("OPENCODE_CONFIG_CONTENT=".length));
+  assert.ok(environment.includes("OPENCODE_DISABLE_PROJECT_CONFIG=true"), "the repository's own OpenCode config is not loaded");
+  assert.equal(config.permission.bash, "deny");
+  assert.equal(config.permission.edit, "deny");
+  assert.ok(Object.entries(config.tools).every(([, enabled]) => enabled === false));
+  assert.deepEqual(Object.keys(config.tools).sort(), ["complete_task", "consult", "delegate_task", "report_blocker", "request_revision", "request_user_input"]);
 });

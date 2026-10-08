@@ -1,5 +1,11 @@
 # Spec Changelog
 
+## 2026-10-08 — analysts: the first member of an agent team (rc.135, Stage 12)
+
+- **An analyst is a read-only member of a project's team** (migration 0147). The operator adds one on the Team page: a name, instructions and a verified model on Claude Code or OpenCode, which now play the `analyst` role (registry, `runtime_roles`, `ROLE_CORE.analyst`). Analysts live in `project_analysts`, apart from the assignments a task's snapshot reads.
+- **The orchestrator asks with `platform.consult({member, question})`**, on a conversation turn or a review. `consultation.requested` becomes a `consultation_run` job. The supervisor's new `consult` surface runs the analyst on a **snapshot of the last commit** (`snapshot.mjs`: regular files of HEAD, written by the supervisor, no symlinks), read-only under the Landlock ruleset, with no shell and no platform tool. The answer goes back through `finish_consultation`, and `consultation.answered` or `consultation.failed` becomes a `resume_orchestrator` turn whose message is the answer. That turn is not a review.
+- **The chat shows the question and the analyst's answer**, the answer as the analyst's own message with its model. The orchestrator's instructions list the analysts it may ask. Design: `docs/STAGE_12_ANALYST.md`.
+
 ## 2026-10-08 — a repository map for the orchestrator (rc.134)
 
 - **Every new chat starts with a project briefing** (migration 0146). The supervisor builds a map of the workspace's last commit — layout, languages, manifests and their scripts, the start of the README, the instruction files it holds, the latest commits — as the workspace's owner, after every implementation, sync with GitHub and provisioning. A new orchestrator session is told it in its first turn, with the project's check command and what the earlier tasks changed and which pull requests they became. Repository text is fenced as data; `.env` files, binaries and files over 256 KiB are never read.

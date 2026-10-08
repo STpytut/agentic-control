@@ -13,7 +13,9 @@
 import type { ProjectTeam, TeamAssignment, TeamModel } from "@/lib/team";
 import type { ModelRow, OperatorModels } from "@/lib/models";
 
-export type PickerMode = { kind: "add" } | { kind: "change"; assignment: TeamAssignment };
+export type PickerMode = { kind: "add" } | { kind: "change"; assignment: TeamAssignment } | { kind: "analyst" };
+// The picker for an analyst's model (0147).
+export const ANALYST_PICKER: PickerMode = Object.freeze({ kind: "analyst" });
 
 export type Words = { runtime: (runtime: string) => string; heldBack: Record<string, string>; gateway?: Record<string, string> };
 
@@ -24,11 +26,18 @@ export type Candidate = {
   resolved: string | null;
 };
 
-export function roleOf(mode: PickerMode): "orchestrator" | "executor" {
+export type PickerRole = "orchestrator" | "executor" | "analyst";
+
+export function roleOf(mode: PickerMode): PickerRole {
+  if (mode.kind === "analyst") return "analyst";
   return mode.kind === "change" && mode.assignment.roleKey === "orchestrator" ? "orchestrator" : "executor";
 }
 
-function teamUnavailable(model: TeamModel, role: "orchestrator" | "executor") {
+// An analyst (0147) needs what an executor's model needs — verified, its
+// connection connected — on a runtime that plays the analyst, which
+// `allowed` checks from the runtimes' roles.
+function teamUnavailable(model: TeamModel, role: PickerRole) {
+  if (role === "analyst") return model.executorUnavailable === "runtime_cannot_play_role" ? null : model.executorUnavailable;
   return role === "orchestrator" ? model.orchestratorUnavailable : model.executorUnavailable;
 }
 

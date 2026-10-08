@@ -368,6 +368,10 @@
     "0146_repository_maps.sql": {
       "previousReleaseCompatible": true,
       "note": "Adds project_repository_maps and three functions (record, orchestrator context, panel read); the previous release neither writes nor reads maps."
+    },
+    "0147_analysts.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds project_analysts, consultations and their functions, the analyst role in the runtime mirror, the consultation_run job type, and recreates route_outbox_message and claim_orchestrator_jobs with the consultation's events; the previous release neither asks nor answers consultations and routes every event it knew as before."
     }
   }
 }

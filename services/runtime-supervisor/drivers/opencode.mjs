@@ -62,6 +62,12 @@ const RUN_CONFIG = Object.freeze({
     permission: LOGIN_PERMISSION,
     tools: Object.fromEntries(PLATFORM_COMMAND_TOOL_NAMES.map((name) => [name, false])),
   },
+  // An analyst's run (0147): reads the snapshot; no shell, no edit, no tool of
+  // the platform's.
+  consult: {
+    permission: { ...LOGIN_PERMISSION, edit: "deny", bash: "deny", webfetch: "deny" },
+    tools: Object.fromEntries([...PLATFORM_COMMAND_TOOL_NAMES, ...WORKER_REPORT_TOOLS].map((name) => [name, false])),
+  },
   // A model check (no surface): OpenCode's defaults, less the login.
   gate: {
     permission: LOGIN_PERMISSION,
@@ -80,7 +86,9 @@ function runEnvironment({ surface = null, toolBridge = [] } = {}) {
   const config = RUN_CONFIG[surface ?? "gate"];
   return [
     ...adapter.autoUpdate.environment, "OPENCODE_AUTO_SHARE=false",
-    ...(surface === "project" ? ["OPENCODE_DISABLE_PROJECT_CONFIG=true"] : sandboxShellEnvironment(adapter)),
+    // A turn and an analyst's run (0147) read a repository nobody vetted: its
+    // own OpenCode config, plugins and tools are never loaded.
+    ...(surface === "project" || surface === "consult" ? ["OPENCODE_DISABLE_PROJECT_CONFIG=true"] : sandboxShellEnvironment(adapter)),
     ...(config ? [`OPENCODE_CONFIG_CONTENT=${JSON.stringify(config)}`] : []),
     ...toolBridge,
   ];
@@ -163,6 +171,7 @@ export const opencodeDriver = Object.freeze({
     // An orchestrator's turn: one batch run in the conversation's session, the
     // workspace granted read-only and held read-only by the kernel.
     project: Object.freeze({ transport: "batch", workspace: "grant", grantMode: "read_only", capability: "run.read_only" }),
+    consult: Object.freeze({ transport: "batch", workspace: "snapshot", capability: "run.read_only" }),
     gate: Object.freeze({ transport: "batch", workspace: "gate", capability: "gate.smoke" }),
     account: Object.freeze({ transport: "local_server", capability: "account.api_key" }),
   }),

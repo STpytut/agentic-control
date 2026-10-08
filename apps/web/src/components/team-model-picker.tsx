@@ -47,7 +47,7 @@ export function TeamModelPicker({ team, models, mode, onSubmit, onClose }: {
   team: ProjectTeam; models: OperatorModels | null; mode: PickerMode; onSubmit: PickerSubmit; onClose: () => void;
 }) {
   const role = roleOf(mode);
-  const title = mode.kind === "add" ? "Add executor" : `Change model · ${mode.assignment.roleName}`;
+  const title = mode.kind === "add" ? "Add executor" : mode.kind === "analyst" ? "Analyst's model" : `Change model · ${mode.assignment.roleName}`;
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState("");
   const [phase, setPhase] = useState<Phase>({ step: "idle" });
@@ -176,9 +176,9 @@ export function TeamModelPicker({ team, models, mode, onSubmit, onClose }: {
   const status = !picked ? ""
     : phase.step === "requesting" ? `Starting the check of ${picked.name}…`
     : phase.step === "checking" ? `Checking ${picked.name}… (${elapsed} s${pickedWatch?.check?.queuePosition ? `, ${pickedWatch.check.queuePosition} ahead` : ""}${pickedWatch?.check?.state === "waiting" ? `, waiting: ${pickedWatch.check.reason ?? "its turn"}` : ""})${phase.armed ? " — adds when it passes" : ""}`
-    : phase.step === "submitting" ? (mode.kind === "add" ? `Adding ${picked.name}…` : `Changing to ${picked.name}…`)
+    : phase.step === "submitting" ? (mode.kind === "change" ? `Changing to ${picked.name}…` : `Adding ${picked.name}…`)
     : "";
-  const verb = mode.kind === "add" ? "Add" : "Change";
+  const verb = mode.kind === "change" ? "Change" : "Add";
   // The picked model's levels, where the team's read knows them; the member's
   // own level is shown while the new model lists it, as the change keeps it.
   const pickedLevels = picked ? team.reasoning.models[picked.entryId] : undefined;
@@ -188,7 +188,7 @@ export function TeamModelPicker({ team, models, mode, onSubmit, onClose }: {
   return <section role="group" aria-labelledby="team-picker-title" className="mt-3 grid gap-3 border-t border-line pt-3">
     <div className="flex flex-wrap items-baseline justify-between gap-2">
       <h3 id="team-picker-title" className="type-card-title">{title}</h3>
-      <span className="type-meta text-muted">Role: {role === "orchestrator" ? "orchestrator" : "executor"}</span>
+      <span className="type-meta text-muted">Role: {role}</span>
     </div>
     <TextInput type="search" value={query} onChange={(event) => setQuery(event.target.value)} autoFocus
       placeholder={moreToSearch ? `Search models (and ${moreToSearch} more)…` : "Search models…"} aria-label="Search models"/>
