@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 
 import { FAILURE_CODES, wrapFailure } from "../control-plane/failure.mjs";
 import { PROTOCOL_VERSION, createFrameReader, createFrameWriter, negotiatedVersion } from "./framing.mjs";
-import { githubPublishRequest, githubWorkspaceRequest } from "./github-workspace-protocol.mjs";
+import { githubPublishRequest, githubSyncRequest, githubWorkspaceRequest } from "./github-workspace-protocol.mjs";
 import { driverFor, surfaceOf } from "./drivers/index.mjs";
 
 // How long to wait for a run the supervisor is still executing.
@@ -426,6 +426,22 @@ export class RuntimeSupervisorClient extends EventEmitter {
 
   async releasePublishExport({ intentId }) {
     return this.#request(githubPublishRequest("release_publish_export", intentId));
+  }
+
+  // 0145: an inbox for the bundle of GitHub's base branch, the sync applied
+  // from it, and the inbox removed.
+  async prepareWorkspaceSync({ syncId }) {
+    return this.#request(githubSyncRequest("prepare_workspace_sync", syncId));
+  }
+
+  // Long enough for the supervisor's own git (120 s per command) and the
+  // wait for the workspace's turn.
+  async applyWorkspaceSync({ syncId }) {
+    return this.#request(githubSyncRequest("apply_workspace_sync", syncId), 10 * 60_000);
+  }
+
+  async releaseWorkspaceSync({ syncId }) {
+    return this.#request(githubSyncRequest("release_workspace_sync", syncId));
   }
 
   // An account operation on a runtime whose account surface is a loopback

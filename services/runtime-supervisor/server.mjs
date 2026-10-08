@@ -1,7 +1,8 @@
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { chmod, chown, lstat, mkdir, mkdtemp, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { constants as fsConstants, createWriteStream, readFileSync } from "node:fs";
+import { pipeline } from "node:stream/promises";
+import { chmod, chown, lstat, mkdir, mkdtemp, open, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -32,7 +33,8 @@ import { qualificationExecutable, qualificationPaths, scratchReadOnlyWritable, s
 import { INSTALLATION_LAYOUT } from "../operations/installation-layout.mjs";
 import { createWorkspaceSerializer, resolveWorkspaceGrant } from "./workspace-grant.mjs";
 import { createDeprovisionDeadline, createProjectSingleFlight } from "./deprovision-bound.mjs";
-import { githubWorkspaceAction, isPublishAction } from "./github-workspace-protocol.mjs";
+import { githubWorkspaceAction, isPublishAction, isSyncAction } from "./github-workspace-protocol.mjs";
+import { applyWorkspaceSync } from "./workspace-sync.mjs";
 import { exportApprovedCommit } from "./publish-export.mjs";
 import { startMailbox } from "./run-mailbox.mjs";
 import { ensureRunToolRoot, openRunToolSocket, sweepRunToolSockets } from "./worker-tool-socket.mjs";
@@ -398,6 +400,88 @@ async function githubPublishExport(request, action) {
     await chown(file, 0, githubBrokerGroupId);
     await chmod(file, 0o440);
     return { pack_path: file, head_ref: exported.head_ref, head_sha: exported.head_sha, bytes: exported.pack.length };
+  });
+}
+
+// 0145: a workspace brought up to date with GitHub. The database names the
+// claimed sync and its project, not the broker that asks. The broker writes the
+// bundle of GitHub's base branch into an inbox made here for it; the bundle is
+// copied to a scratch file the workspace's owner can read, and applied as that
+// owner, in the workspace's turn (workspace-sync.mjs) — never as root, and
+// never by the broker, which holds a token and would run the repository's own
+// git configuration.
+const syncInboxRoot = path.join(canonicalWorkspaceRoot, ".sync");
+
+async function githubWorkspaceSync(request, action) {
+  if (!/^[0-9a-f-]{36}$/i.test(String(request.sync_id ?? ""))) throw new Error("invalid workspace sync id");
+  const inbox = path.join(syncInboxRoot, request.sync_id.toLowerCase());
+  if (action === "sync_release") {
+    await rm(inbox, { recursive: true, force: true });
+    return { released: true };
+  }
+  const target = await queryJson(`SELECT workspace_sync_target(:'id'::uuid)::text;`, { id: request.sync_id });
+  if (!target) throw new Error("workspace sync authorization failed");
+  const workspace = path.join(canonicalWorkspaceRoot, target.project_id);
+  if (path.resolve(String(target.workspace_path ?? "")) !== workspace) {
+    throw new Error("sync workspace path does not match the project allocation");
+  }
+  if (action === "sync_prepare") {
+    await mkdir(syncInboxRoot, { recursive: true, mode: 0o711 });
+    await chmod(syncInboxRoot, 0o711);
+    await rm(inbox, { recursive: true, force: true });
+    await mkdir(inbox, { mode: 0o770 });
+    await chown(inbox, 0, githubBrokerGroupId);
+    await chmod(inbox, 0o770);
+    return { inbox, base_branch: target.base_branch };
+  }
+  const finish = async (result) => {
+    await queryJson(`SELECT finish_workspace_sync(:'id'::uuid,:'result'::jsonb)::text;`,
+      { id: request.sync_id, result: JSON.stringify(result) });
+    return result;
+  };
+  if (!(await assertWorkspaceOnDisk(workspace))) return await finish({ status: "failed", outcome: "the workspace is not on disk" });
+  const bundle = path.join(inbox, "origin.bundle");
+  return await inWorkspaceTurn(workspace, async () => {
+    const current = await queryJson(`SELECT workspace_sync_target(:'id'::uuid)::text;`, { id: request.sync_id });
+    // The lease ran out while waiting for the turn: another claim owns it now.
+    if (!current) throw new Error("the workspace sync is no longer claimed");
+    if (current.run_holds_workspace) {
+      return await finish({ status: "kept", outcome: "a run is in the workspace; the next chat syncs it" });
+    }
+    const owner = inspectOwner((await stat(workspace)).uid, runtimeUid);
+    const uid = runtimeUid(owner);
+    const scratch = await mkdtemp(path.join(tmpdir(), "infra-cod-sync-"));
+    try {
+      const readable = path.join(scratch, "origin.bundle");
+      // The inbox is the broker's to write: what it left is opened without
+      // following a link and without blocking on a FIFO, and read only if it is
+      // a regular file the broker's group owns — root never copies a path the
+      // broker could point at /etc/shadow or another project.
+      let handle;
+      try {
+        handle = await open(bundle, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+      } catch {
+        return await finish({ status: "failed", outcome: "the broker left no bundle of GitHub's branch" });
+      }
+      try {
+        const info = await handle.stat();
+        if (!info.isFile() || info.gid !== githubBrokerGroupId || info.size > 2 * 1024 ** 3) {
+          return await finish({ status: "failed", outcome: "what the broker left is not a bundle file of its own" });
+        }
+        await pipeline(handle.createReadStream({ autoClose: false }), createWriteStream(readable, { mode: 0o600, flags: "wx" }));
+      } finally {
+        await handle.close();
+      }
+      await chown(scratch, uid, (await stat(scratch)).gid);
+      await chown(readable, uid, (await stat(readable)).gid);
+      await chmod(scratch, 0o700);
+      const result = await applyWorkspaceSync({ runGit: gitAs(owner, workspace), bundlePath: readable,
+        baseBranch: target.base_branch, mode: target.mode });
+      process.stderr.write(`${JSON.stringify({ type: "workspace.synced", sync_id: request.sync_id, project_id: target.project_id, status: result.status, outcome: result.outcome })}\n`);
+      return await finish(result);
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
   });
 }
 
@@ -3086,7 +3170,9 @@ const githubBrokerServer = net.createServer((socket) => {
         if (!action) throw new Error("unsupported github broker request");
         const result = isPublishAction(action)
           ? await githubPublishExport(request, action)
-          : await githubAppWorkspace(request, action);
+          : isSyncAction(action)
+            ? await githubWorkspaceSync(request, action)
+            : await githubAppWorkspace(request, action);
         send(socket, { request_id: request.request_id, ok: true, result });
       } catch (error) {
         send(socket, { request_id: request?.request_id, ok: false, error: error.message });

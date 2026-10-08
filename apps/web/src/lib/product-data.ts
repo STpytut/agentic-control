@@ -28,6 +28,8 @@ export type ProjectSummary = {
   /** The owner's check command, run by the platform after each implementation (0143); "" when none. */
   checkCommand: string;
   checkTimeoutSeconds: number;
+  /** How the platform reaches the repository: "github_app" is the one it syncs and publishes. */
+  credentialMode: string;
 };
 
 export type RuntimeChoice = {
@@ -281,6 +283,7 @@ const demoProject: ProjectSummary = {
   version: 1,
   checkCommand: "",
   checkTimeoutSeconds: 600,
+  credentialMode: "",
 };
 
 function projectFromRow(row: Json): ProjectSummary {
@@ -305,6 +308,7 @@ function projectFromRow(row: Json): ProjectSummary {
     version: Number(row.version ?? 1),
     checkCommand: typeof row.check_command === "string" ? row.check_command : "",
     checkTimeoutSeconds: Number(row.check_timeout_seconds ?? 600),
+    credentialMode: typeof row.credential_mode === "string" ? row.credential_mode : "",
   };
 }
 

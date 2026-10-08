@@ -11,6 +11,8 @@ import { ProjectTeamTab } from "@/components/project-team";
 import { ChangedFilesCard, HandoffCard, UnpublishedCommitsCard, WorkspaceCleanBadge, WorkspaceLockCard, WorkspaceMetrics } from "@/components/workspace-state";
 import { IssueIntakeSettings } from "@/components/issue-intake";
 import { ProjectCheckCard } from "@/components/project-check-card";
+import { WorkspaceSyncCard } from "@/components/workspace-sync-card";
+import { getWorkspaceSync } from "@/lib/workspace-sync";
 import { Notice } from "@/components/ui/notice";
 import { statusTone } from "@/components/ui/status-tone";
 import { getProjectDeletionState, getProjectReadiness, getProjectRuntimeDefaults, getProjectTeam, getProjectWorkspace, getRuntimeCatalog , getIssueIntake } from "@/lib/product-data";
@@ -53,6 +55,9 @@ export default async function ProjectSettingsPage({ params, searchParams }: { pa
   const workspace = await getProjectWorkspace(operator.userId, projectId);
   if (!workspace) notFound();
   const { project } = workspace;
+  // Only for a GitHub App project (0145); undefined hides the card.
+  const workspaceSync = page === "workspace" && project.credentialMode === "github_app"
+    ? await getWorkspaceSync(project.id, operator.userId).catch(() => null) : undefined;
   const deleting = ["deleting", "deletion_failed"].includes(project.status);
   if (current === "danger" && !deleting) redirect(`/projects/${project.id}/settings/general`);
   // Each page reads what it shows, after the workspace has answered for the owner.
@@ -110,6 +115,7 @@ export default async function ProjectSettingsPage({ params, searchParams }: { pa
           <SettingsPageHeader title="Workspace" description="The repository as the host sees it: Git state, executor checks and single-writer ownership." action={<WorkspaceCleanBadge state={workspace.workspaceState}/>}/>
           <div className="grid gap-3">
             <ProjectCheckCard projectId={project.id} command={project.checkCommand} timeoutSeconds={project.checkTimeoutSeconds}/>
+            {workspaceSync !== undefined && <WorkspaceSyncCard projectId={project.id} initial={workspaceSync} baseBranch={project.defaultBranch}/>}
             <WorkspaceMetrics state={workspace.workspaceState}/>
             <WorkspaceLockCard state={workspace.workspaceState} projectId={project.id} writeEnabled/>
             <UnpublishedCommitsCard state={workspace.workspaceState}/>

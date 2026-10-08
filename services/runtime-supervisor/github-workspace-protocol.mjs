@@ -6,9 +6,15 @@ const ACTIONS = Object.freeze({
   // for the broker to push, and the export removed when it is done.
   export_publish_commit: "publish_export",
   release_publish_export: "publish_release",
+  // 0145: GitHub's base branch, fetched by the broker into a bundle in an
+  // inbox the supervisor makes, applied to the workspace by the supervisor.
+  prepare_workspace_sync: "sync_prepare",
+  apply_workspace_sync: "sync_apply",
+  release_workspace_sync: "sync_release",
 });
 
 const PUBLISH_ACTIONS = new Set(["publish_export", "publish_release"]);
+const SYNC_ACTIONS = new Set(["sync_prepare", "sync_apply", "sync_release"]);
 
 export function githubWorkspaceAction(type) {
   return ACTIONS[type] ?? null;
@@ -18,9 +24,18 @@ export function isPublishAction(action) {
   return PUBLISH_ACTIONS.has(action);
 }
 
+export function isSyncAction(action) {
+  return SYNC_ACTIONS.has(action);
+}
+
+export function githubSyncRequest(type, syncId) {
+  if (!isSyncAction(githubWorkspaceAction(type))) throw new Error("unsupported github sync request");
+  return { type, sync_id: syncId };
+}
+
 export function githubWorkspaceRequest(type, projectId) {
   const action = githubWorkspaceAction(type);
-  if (!action || isPublishAction(action)) throw new Error("unsupported github workspace request");
+  if (!action || isPublishAction(action) || isSyncAction(action)) throw new Error("unsupported github workspace request");
   return { type, project_id: projectId };
 }
 

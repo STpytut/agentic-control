@@ -589,6 +589,97 @@ async function mintIssueCommentToken(item) {
   return response.token;
 }
 
+// 0145: GitHub's base branch for a workspace sync. A read-only token, a
+// throwaway bare clone of that one branch in this process's private /tmp, and
+// a bundle of it written into the inbox the supervisor made — the supervisor
+// applies it to the workspace as its owner. Nothing here reads or runs
+// anything of the workspace's.
+async function mintSyncToken(snapshot) {
+  if (!app.appId) throw new GithubAppError("invalid_config", "GitHub App ID is not configured on the VPS broker.");
+  loadPrivateKeyFromFile();
+  const response = await createInstallationToken({
+    appId: app.appId, privateKeyPem: privateKey(), installationId: snapshot.installation_id,
+    repositoryIds: [snapshot.github_repository_id], permissions: { contents: "read", metadata: "read" },
+  });
+  return response.token;
+}
+
+export async function processWorkspaceSync(sync, {
+  worker = workerId,
+  db = queryJson,
+  mintToken = mintSyncToken,
+  revokeToken = (token, secrets) => revokeInstallationToken({ installationToken: token, secrets }),
+  supervisor = new RuntimeSupervisorClient({ socketPath: supervisorSocket }),
+  remoteUrlFor = (item) => sanitizeCloneUrl(item.repository_url),
+  runGit = (args, env) => execFileSync("/usr/bin/git", args, { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"], timeout: cloneTimeoutMs, maxBuffer: 2 * 1024 * 1024 }),
+} = {}) {
+  const secrets = [];
+  let token = null;
+  let helper = null;
+  let snapshot = null;
+  let connected = false;
+  let prepared = false;
+  let fetched = false;
+  const said = (error) => redactSecrets(error instanceof Error ? error.message : String(error), secrets).slice(0, 400);
+  const finishFailed = (outcome) => db(`SELECT finish_workspace_sync(:'id'::uuid,:'result'::jsonb)::text;`,
+    { id: sync.sync_id, result: JSON.stringify({ status: "failed", outcome }) }).catch(() => undefined);
+  try {
+    const remoteUrl = remoteUrlFor(sync);
+    if (!remoteUrl) { await finishFailed("the repository URL is outside the GitHub allowlist"); return { status: "failed" }; }
+    snapshot = await db(`SELECT acquire_github_clone_authorization(:'project_id'::uuid,:'worker')::text;`,
+      { project_id: sync.project_id, worker });
+    if (!snapshot?.installation_id || !snapshot?.github_repository_id) {
+      await finishFailed("the project has no GitHub connection to read from"); return { status: "failed" };
+    }
+    token = await mintToken(snapshot);
+    secrets.push(token);
+    const fence = await db(`SELECT validate_github_clone_authorization(:'auth_id'::uuid,:'worker')::text;`,
+      { auth_id: snapshot.authorization_id, worker });
+    if (fence?.status !== "active") { await finishFailed("the GitHub connection changed during the sync"); return { status: "failed" }; }
+    await supervisor.connect();
+    connected = true;
+    const inbox = await supervisor.prepareWorkspaceSync({ syncId: sync.sync_id });
+    prepared = true;
+    helper = await createAskpassHelper(token);
+    const env = { PATH: process.env.PATH ?? "/usr/bin:/bin", GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: helper.helperFile,
+      GIT_CONFIG_NOSYSTEM: "1", HOME: helper.tempDir };
+    const bare = path.join(helper.tempDir, "origin.git");
+    try {
+      runGit(["clone", "--bare", "--quiet", "--no-tags", "--single-branch", "--branch", sync.base_branch, remoteUrl, bare], env);
+      runGit(["-C", bare, "bundle", "create", "--quiet", path.join(inbox.inbox, "origin.bundle"), `refs/heads/${sync.base_branch}`], env);
+    } catch (error) {
+      const detail = String(error?.stderr ?? error?.message ?? "");
+      // An empty repository, or one whose base branch is not there yet.
+      const outcome = /Remote branch .* not found|remote HEAD refers to nonexistent ref|empty repository/i.test(detail)
+        ? `GitHub has no ${sync.base_branch} branch yet; nothing to sync`
+        : `reading GitHub: ${normalizeCloneError(detail, secrets)}`;
+      await db(`SELECT finish_workspace_sync(:'id'::uuid,:'result'::jsonb)::text;`,
+        { id: sync.sync_id, result: JSON.stringify({ status: /no .* branch yet/.test(outcome) ? "kept" : "failed", outcome: outcome.slice(0, 400) }) })
+        .catch(() => undefined);
+      return { status: "failed" };
+    }
+    fetched = true;
+    const applied = await supervisor.applyWorkspaceSync({ syncId: sync.sync_id });
+    return { status: applied?.status ?? "unknown", outcome: applied?.outcome };
+  } catch (error) {
+    // Finished wherever it broke — after the fetch too, when the apply threw —
+    // so it is not left claimed and offered again; a sync the supervisor
+    // already finished refuses this, which is swallowed.
+    await finishFailed(said(error));
+    return { status: "failed", error: said(error) };
+  } finally {
+    if (prepared) await supervisor.releaseWorkspaceSync({ syncId: sync.sync_id }).catch(() => undefined);
+    if (connected) supervisor.close();
+    if (helper) await rm(helper.tempDir, { recursive: true, force: true }).catch(() => undefined);
+    if (token) await revokeToken(token, secrets).catch(() => undefined);
+    if (snapshot?.authorization_id) {
+      await db(`SELECT finalize_github_clone_authorization(:'auth_id'::uuid,:'worker',:'success'::boolean)::text;`,
+        { auth_id: snapshot.authorization_id, worker, success: String(fetched) }).catch(() => undefined);
+    }
+    token = null;
+  }
+}
+
 export async function runOnce() {
   const results = [];
   try {
@@ -628,6 +719,11 @@ export async function runOnce() {
   for (const item of Array.isArray(comments) ? comments : []) {
     try { results.push({ kind: "issue_comment", link_id: item.id, result: await processIssueComment(item) }); }
     catch (error) { results.push({ kind: "issue_comment", link_id: item.id, error: redactSecrets(error?.message ?? "issue comment failed") }); }
+  }
+  const sync = await queryJson(`SELECT claim_workspace_sync(:'worker')::text;`, { worker: workerId });
+  if (sync) {
+    try { results.push({ kind: "workspace_sync", project_id: sync.project_id, result: await processWorkspaceSync(sync) }); }
+    catch (error) { results.push({ kind: "workspace_sync", project_id: sync.project_id, error: redactSecrets(error?.message ?? "workspace sync failed") }); }
   }
   const projects = await queryJson(`SELECT claim_github_app_clone_projects(:'worker',3)::text;`, { worker: workerId });
   for (const project of Array.isArray(projects) ? projects : []) {

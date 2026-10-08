@@ -683,6 +683,11 @@ INSERT INTO infra_web_allowlist(signature) VALUES
   -- 0143: the project's check command, owner-only (checked by the function).
   -- What the supervisor reads per run is not granted.
   ('set_project_check(p_project_id uuid, p_owner_id uuid, p_command text, p_timeout_seconds integer)'),
+  -- 0145: a workspace sync with GitHub, owner-only (checked by the
+  -- functions): ask for one, read the latest. The broker's and supervisor's
+  -- functions are not granted.
+  ('request_workspace_sync(p_project_id uuid, p_owner_id uuid, p_mode text)'),
+  ('get_workspace_sync(p_project_id uuid, p_owner_id uuid)'),
   -- 0088 (sprint C U1): read-only. The four readiness states of every
   -- assignment of a project, checking the owner itself; it reads
   -- provider_connections, which infra_web may not, so it is SECURITY DEFINER.
