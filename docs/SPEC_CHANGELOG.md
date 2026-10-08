@@ -1,5 +1,9 @@
 # Spec Changelog
 
+## 2026-10-08 — delegating after the analyst's answer (rc.139)
+
+- **The turn that brings an analyst's answer may delegate** (migration 0149). rc.136's orchestrator waited for the answer its plan needed, planned in the answer's turn, and was refused: `invoke_delegate_task` took only a conversation turn. A `resume_orchestrator` turn brought by `consultation.answered` or `consultation.failed` now delegates as a conversation turn does; a review's resume still does not.
+
 ## 2026-10-08 — role chips, pull request titles, pages rendered in the gate (rc.138)
 
 - **Each agent's role is a chip of its own colour** beside its name in the chat: orchestrator, reviewer, executor, analyst.
