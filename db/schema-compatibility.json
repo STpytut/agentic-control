@@ -356,6 +356,10 @@
     "0143_project_checks.sql": {
       "previousReleaseCompatible": true,
       "note": "Adds projects.check_command (nullable) and check_timeout_seconds (defaulted), set_project_check and project_check_for_run; the previous release never sets or reads them."
+    },
+    "0144_notify_after_review.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Recreates the approval-notification trigger with a narrower WHEN (reviewing to awaiting_review); no table, column or function changes."
     }
   }
 }

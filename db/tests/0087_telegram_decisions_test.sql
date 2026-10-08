@@ -25,6 +25,7 @@ BEGIN
   PERFORM record_telegram_chat(v_owner, v_code, 4242, '@owner');
   UPDATE notification_outbox SET status='sent' WHERE status='pending';
 
+  UPDATE tasks SET status='reviewing' WHERE id=v_task;
   UPDATE tasks SET status='awaiting_review' WHERE id=v_task;
   SELECT decision_token INTO v_token FROM notification_outbox WHERE operator_id=v_owner AND kind='approval';
   IF v_token IS NULL OR v_token !~ '^[A-Za-z0-9]{20}$' THEN RAISE EXCEPTION 'the approval message has no decision token'; END IF;
