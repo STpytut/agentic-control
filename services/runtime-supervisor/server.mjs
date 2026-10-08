@@ -29,6 +29,7 @@ import { activeQualification, assertCapability, capabilityVerification } from ".
 import { allDrivers, driverFor, surfaceOf } from "./drivers/index.mjs";
 import { executableDigest, readRuntimes } from "../operations/runtime-inventory.mjs";
 import { PROBE_OUTPUT_MAX_BYTES, checkProbeOutput } from "./provider-usage-check.mjs";
+import { createTokenMeter } from "./run-token-meter.mjs";
 import { qualificationExecutable, qualificationPaths, scratchReadOnlyWritable, stateToCopy, writableStateInHome } from "./qualification-surface.mjs";
 import { INSTALLATION_LAYOUT } from "../operations/installation-layout.mjs";
 import { createWorkspaceSerializer, resolveWorkspaceGrant } from "./workspace-grant.mjs";
@@ -1199,7 +1200,7 @@ async function runConsultBatch(request, driver, control = new LaunchControl()) {
     const args = cleanRuntimeArgs(account, snapshotDir, driver.executable, driver.run.argv({
       model: driver.run.qualifyModel(context.provider_id ?? null, context.model),
       prompt: request.prompt, surface: "consult", reasoningEffort: context.reasoning_effort ?? null,
-      subagents: context.allow_subagents === true,
+      subagents: context.allow_subagents === true, fallbackModel: context.fallback_model ?? null,
     }), driver.run.environment({ surface: "consult", subagents: context.allow_subagents === true }),
     { readOnlyWritable: driver.run.readOnlyWritable });
     leaf = await isolation.create(`consult-${randomUUID()}`, runMemoryLimit(driver));
@@ -1208,6 +1209,8 @@ async function runConsultBatch(request, driver, control = new LaunchControl()) {
     const terminate = (signal = "SIGTERM") => { isolation.signal(leaf, signal).catch(() => {}); };
     control.bind(async () => { interrupted = true; await isolation.stop(leaf, { child }); });
     const timer = setTimeout(() => { timedOut = true; terminate(); }, CONSULT_TIMEOUT_MS);
+    // rc.142: the analyst's token limit per run, metered from its stream.
+    const meter = createTokenMeter(driver.name, context.run_token_limit);
     const collect = (target, chunk) => {
       const next = target + chunk;
       if (Buffer.byteLength(next) > 4 * 1024 * 1024) { outputExceeded = true; terminate(); }
@@ -1225,6 +1228,7 @@ async function runConsultBatch(request, driver, control = new LaunchControl()) {
         const parsed = driver.stream.parse(line);
         if (!parsed) continue;
         resolvedModel ??= driver.stream.resolvedModel?.(parsed.raw) ?? null;
+        if (meter.add(parsed.raw)) terminate();
         // 0151: the analyst's activity under its job, as a turn's is: the
         // usage trigger counts its tokens from it.
         if (parsed.event) activity = activity.then(() => appendActivity(parsed.event)).catch(() => {});
@@ -1241,6 +1245,7 @@ async function runConsultBatch(request, driver, control = new LaunchControl()) {
     if (exitCode === READ_ONLY_LAUNCH_EXIT) throw new Error(`the read-only launch was refused: ${stderr.trim().split("\n").at(-1) ?? ""}`);
     if (outputExceeded) throw new Error("the analyst's output exceeded 4 MiB");
     if (timedOut) throw new Error(`the analyst ran past ${CONSULT_TIMEOUT_MS / 60_000} minutes and was ended`);
+    if (meter.exceeded && !interrupted) throw new Error(meter.describe());
     return {
       exit_code: exitCode, signal, interrupted, response: driver.stream.answer(stdout),
       failure: driver.stream.failure?.(stdout) ?? "", stderr: stderr.slice(-2000),
@@ -1964,7 +1969,9 @@ async function validateExecutorLaunch(request) {
       'commit_identity', commit_identity_for(j.project_id),
       -- M7 (0151): the runtime's own subagents, as the operator set for this
       -- executor on the Team page; off unless allowed.
-      'allow_subagents', COALESCE((pa.config->>'allow_subagents')::boolean, false)
+      'allow_subagents', COALESCE((pa.config->>'allow_subagents')::boolean, false),
+      -- rc.142 (0152): its token limit per run and its fallback model.
+      'run_settings', executor_run_settings(pa.id)
     )::text
     FROM runtime_jobs j
     JOIN projects p ON p.id = j.project_id
@@ -2261,6 +2268,7 @@ async function runFencedBatch(request, driver, control = new LaunchControl()) {
         reasoningEffort: context.reasoning_effort ?? null,
         version: activeVersionOf(driver.name),
         subagents: context.allow_subagents === true,
+        fallbackModel: context.run_settings?.fallback_model ?? null,
       }),
       [...driver.run.environment({
         surface: "task",
@@ -2332,6 +2340,10 @@ async function runFencedBatch(request, driver, control = new LaunchControl()) {
   // next: a grace for its closing message, then SIGTERM, then SIGKILL. The exit
   // that follows is the run ending as reported, not a failure.
   const reportEnd = endAfterReport(terminate, { graceMs: terminalReportGraceMs });
+  // rc.142: the executor's token limit per run, metered from its stream. A run
+  // that has reported is done whatever it spends on its closing message.
+  const meter = createTokenMeter(driver.name, context.run_settings?.run_token_limit);
+  let overLimit = false;
   reportGate.onAccepted = reportEnd.arm;
   if (reportGate.accepted) reportEnd.arm();
   // Serialises the activity-event writes issued from the stdout handler below.
@@ -2373,6 +2385,7 @@ async function runFencedBatch(request, driver, control = new LaunchControl()) {
       if (!parsed) continue;
       observedNativeSessionId ??= driver.sessions.idFromEvent(parsed.raw);
       resolvedModel ??= driver.stream.resolvedModel?.(parsed.raw) ?? null;
+      if (meter.add(parsed.raw) && !reportGate.accepted) { overLimit = true; terminate(); }
       const { event } = parsed;
       // Written from a synchronous stdout handler, one per line, and read
       // back in order by the activity feed. psql was synchronous so ordering
@@ -2397,11 +2410,12 @@ async function runFencedBatch(request, driver, control = new LaunchControl()) {
     // Ended by the supervisor after its report was accepted: the run finished
     // as it reported, so it exits as a success. An interrupt or a timeout that
     // arrived first keeps its own meaning.
-    const endedAsReported = reportEnd.ended() && !interrupted && !timedOut;
+    const endedAsReported = reportEnd.ended() && !interrupted && !timedOut && !overLimit;
     const exitCode = endedAsReported ? 0 : exited.exitCode;
     const signal = endedAsReported ? null : exited.signal;
     Object.assign(nativeResult, { status: "exited", exit_code: exitCode, signal, interrupted, timed_out: timedOut,
       output_exceeded: outputExceeded, pid: child.pid, ended_on_report: endedAsReported,
+      ...(meter.limit !== null ? { tokens_metered: meter.total, token_limit: meter.limit, over_token_limit: overLimit } : {}),
       memory: await taskMemory?.stop() ?? null });
     if (outputExceeded) throw new Error("runtime output exceeded 4 MiB");
     // Named, because the alternative is what happened: the child was killed and
@@ -2413,6 +2427,7 @@ async function runFencedBatch(request, driver, control = new LaunchControl()) {
         `runtime run exceeded ${Math.round(runTimeoutMs / 60_000)} minutes and was ended by the supervisor`,
       );
     }
+    if (overLimit && !interrupted) throw new Error(meter.describe());
     // The acknowledgement is written before the run is reported ended.
     await mailbox.stop();
     if (interrupted) return {

@@ -29,6 +29,7 @@ import { normalizeClaudeEvent } from "../runtime-events.mjs";
 import { launchReasoningLevel } from "./reasoning.mjs";
 import { PLATFORM_COMMAND_TOOL_NAMES, WORKER_REPORT_TOOLS } from "./tool-contracts.mjs";
 import { sandboxShellEnvironment } from "../sandbox-shell.mjs";
+import { ANALYST_REPORT_SCHEMA, renderAnalystReport } from "../analyst-report.mjs";
 
 const adapter = adapterFor("claude");
 
@@ -79,9 +80,12 @@ const SURFACE_ARGS = Object.freeze({
   ],
   gate: () => ["--tools", "", "--disallowedTools", DENIED_READS, "--strict-mcp-config", "--permission-mode", "dontAsk"],
   // An analyst's run (0147): the snapshot read, nothing called, nothing written.
+  // Its answer is held to the report's shape (rc.142, analyst-report.mjs), and
+  // its session is not kept: an analyst answers once and is never resumed.
   consult: ({ subagents = false } = {}) => [
     "--tools", withSubagents(READ_TOOLS, subagents), "--allowedTools", withSubagents(READ_TOOLS, subagents), "--disallowedTools", DENIED_READS,
     "--strict-mcp-config", "--permission-mode", "dontAsk",
+    "--json-schema", JSON.stringify(ANALYST_REPORT_SCHEMA), "--no-session-persistence",
   ],
   // An executor's run (Stage 12 X1): the workspace granted read-write, its
   // tools pre-approved and nothing else (`dontAsk`), its terminal reports as
@@ -154,10 +158,13 @@ function objects(stdout) {
 }
 
 // The turn's answer: the result's text when the turn finished, else the last
-// thing the model wrote.
+// thing the model wrote. A run held to a schema (an analyst's, rc.142) answers
+// with `structured_output`, rendered as the report's text.
 function answer(stdout) {
   const raws = objects(stdout);
   const result = raws.findLast((raw) => raw.type === "result");
+  const report = result && !result.is_error ? renderAnalystReport(result.structured_output) : "";
+  if (report) return report;
   if (!result?.is_error && typeof result?.result === "string") return result.result.trim();
   const assistant = raws.findLast((raw) => raw.type === "assistant"
     && Array.isArray(raw.message?.content) && raw.message.content.some((block) => block?.type === "text"));
@@ -261,14 +268,20 @@ export const claudeDriver = Object.freeze({
     // no option can take the prompt as one of its values (the PoC's order).
     // --effort only when the member has a level: none leaves the model's own
     // default, and the flag does not persist past this process.
-    argv: ({ model, sessionId = null, newSessionId = null, prompt, surface = "gate", reasoningEffort = null, subagents = false }) => {
+    // A member's fallback (rc.142, 0152) on an executor's or analyst's run:
+    // Claude Code switches to it when the model is overloaded or not available.
+    argv: ({ model, sessionId = null, newSessionId = null, prompt, surface = "gate", reasoningEffort = null, subagents = false,
+      fallbackModel = null }) => {
       if (surface === "account") return ["auth", "login"];
       const surfaceArgs = SURFACE_ARGS[surface];
       if (!surfaceArgs) throw new Error(`Claude Code has no ${JSON.stringify(surface)} surface`);
       const effort = launchReasoningLevel(claudeDriver, reasoningEffort);
+      const fallback = (surface === "task" || surface === "consult") && typeof fallbackModel === "string"
+        && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/.test(fallbackModel) && fallbackModel !== model ? fallbackModel : null;
       return [
         "-p", ...surfaceArgs({ subagents }), "--setting-sources", "user", ...sessionArgs({ sessionId, newSessionId }),
         ...(effort ? ["--effort", effort] : []),
+        ...(fallback ? ["--fallback-model", fallback] : []),
         "--output-format", "stream-json", "--verbose", "--model", model, prompt,
       ];
     },
@@ -280,6 +293,12 @@ export const claudeDriver = Object.freeze({
       ...toolBridge,
     ],
     readOnlyWritable: Object.freeze([...adapter.writableState, "/tmp", "/dev/null"]),
+    // The flags these launches pass that a version could drop or rename: a
+    // candidate whose `--help` lacks one fails qualification (config.keys)
+    // instead of failing runs once promoted. rc.142 added the last three.
+    flags: Object.freeze(["--tools", "--allowedTools", "--disallowedTools", "--mcp-config", "--strict-mcp-config",
+      "--permission-mode", "--setting-sources", "--session-id", "--resume", "--effort", "--output-format",
+      "--json-schema", "--fallback-model", "--no-session-persistence"]),
     // The catalog holds Claude Code's own names for its models.
     qualifyModel: (_provider, model) => model,
   }),

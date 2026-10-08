@@ -697,3 +697,43 @@ test("subagents are offered to a writer or an analyst only when the member allow
   assert.ok(off.includes("features.multi_agent=false"));
   assert.ok(!on.includes("features.multi_agent=false"));
 });
+
+// rc.142: an analyst's answer in the report's shape, and a member's fallback.
+test("Claude Code holds an analyst to the report's schema, keeps no session, and falls back only where a member set it", () => {
+  const claude = driverFor("claude");
+  const after = (argv, flag) => argv[argv.indexOf(flag) + 1];
+  const consult = claude.run.argv({ model: "opus", prompt: "Read it", surface: "consult" });
+  assert.deepEqual(JSON.parse(after(consult, "--json-schema")).required, ["summary", "findings", "open_questions"]);
+  assert.ok(consult.includes("--no-session-persistence"));
+  assert.equal(consult.at(-1), "Read it", "the prompt stays last");
+  for (const surface of ["task", "project", "gate"]) {
+    assert.ok(!claude.run.argv({ model: "opus", prompt: "x", surface }).includes("--json-schema"), surface);
+  }
+
+  for (const surface of ["task", "consult"]) {
+    assert.equal(after(claude.run.argv({ model: "opus", prompt: "x", surface, fallbackModel: "claude-sonnet-5-5" }), "--fallback-model"),
+      "claude-sonnet-5-5", surface);
+    assert.ok(!claude.run.argv({ model: "opus", prompt: "x", surface }).includes("--fallback-model"));
+  }
+  assert.ok(!claude.run.argv({ model: "opus", prompt: "x", surface: "project", fallbackModel: "sonnet" }).includes("--fallback-model"),
+    "the orchestrator's turn is not changed");
+  assert.ok(!claude.run.argv({ model: "opus", prompt: "x", surface: "task", fallbackModel: "opus" }).includes("--fallback-model"),
+    "a fallback that is the model itself is not passed");
+  assert.ok(!claude.run.argv({ model: "opus", prompt: "x", surface: "task", fallbackModel: "--tools=Bash" }).includes("--fallback-model"),
+    "a fallback is a model name, never a flag");
+});
+
+test("an analyst's structured output is its answer, rendered as the report", () => {
+  const claude = driverFor("claude");
+  const stdout = [
+    { type: "system", subtype: "init", model: "claude-haiku-5-5", session_id: "s" },
+    { type: "result", subtype: "success", is_error: false, result: "{\"summary\":\"raw\"}", session_id: "s",
+      structured_output: { summary: "The timer resets in one place.", open_questions: ["Is reset also on load?"],
+        findings: [{ file: "src/timer.js", line: 42, claim: "reset() clears the interval" }, { claim: "no tests cover it" }] } },
+  ].map((line) => JSON.stringify(line)).join("\n");
+  assert.equal(claude.stream.answer(stdout), [
+    "The timer resets in one place.",
+    "**Findings**\n- `src/timer.js:42` — reset() clears the interval\n- no tests cover it",
+    "**Open questions**\n- Is reset also on load?",
+  ].join("\n\n"));
+});

@@ -8,6 +8,7 @@ import { Button, Card } from "@agentic/design-system";
 import { TeamModelPicker } from "@/components/team-model-picker";
 import { ANALYST_PICKER } from "@/lib/team-candidates";
 import { SubagentSwitch } from "@/components/subagent-switch";
+import { MemberRunSettings } from "@/components/member-run-settings";
 
 type Submit = (key: string, body: Record<string, unknown>) => Promise<{ ok: boolean; text: string }>;
 
@@ -45,6 +46,9 @@ export function TeamAnalysts({ team, models, busy, submit }: {
             }}/></li>
         : <AnalystRow key={analyst.id} analyst={analyst} busy={busy} onEdit={() => setEditing(analyst.id)}
             subagents={team.subagents[analyst.id] === true}
+            runSettings={<MemberRunSettings memberId={analyst.id} runtime={analyst.runtime} modelId={analyst.modelId}
+              settings={team.runSettings[analyst.id]} models={team.models} busy={busy}
+              onSave={(next) => submit(`run:${analyst.id}`, { kind: "team_set_run_settings", projectId: team.projectId, memberId: analyst.id, ...next })}/>}
             onSubagents={(enabled) => submit(`subagents:${analyst.id}`, { kind: "team_set_subagents", projectId: team.projectId, memberId: analyst.id, enabled })}
             onRemove={() => submit(`analyst-remove:${analyst.id}`, { kind: "team_remove_analyst", projectId: team.projectId, analystId: analyst.id })}/>)}
     </ul>
@@ -82,8 +86,9 @@ export function TeamAnalysts({ team, models, busy, submit }: {
   </Card>;
 }
 
-function AnalystRow({ analyst, busy, onEdit, onRemove, subagents, onSubagents }: {
+function AnalystRow({ analyst, busy, onEdit, onRemove, subagents, onSubagents, runSettings }: {
   analyst: TeamAnalyst; busy: string; onEdit: () => void; onRemove: () => void; subagents: boolean; onSubagents: (enabled: boolean) => void;
+  runSettings: React.ReactNode;
 }) {
   return <li className="min-w-0 border-t border-line pt-3 first-of-type:border-t-0 first-of-type:pt-0">
     <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
@@ -96,6 +101,7 @@ function AnalystRow({ analyst, busy, onEdit, onRemove, subagents, onSubagents }:
     </p>}
     <p className="type-meta mt-1 whitespace-pre-wrap text-muted [overflow-wrap:anywhere]">{analyst.instructions || "No instructions: it answers the question as asked."}</p>
     <SubagentSwitch memberId={analyst.id} allowed={subagents} busy={busy} onChange={onSubagents}/>
+    {runSettings}
     <div className="mt-2 flex flex-wrap gap-2">
       <Button variant="secondary" size="sm" disabled={Boolean(busy)} onClick={onEdit}>Edit</Button>
       <Button variant="secondary" size="sm" disabled={Boolean(busy)} onClick={onRemove}>

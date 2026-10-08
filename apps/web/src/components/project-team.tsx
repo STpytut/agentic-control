@@ -14,6 +14,7 @@ import { ReasoningSelect } from "@/components/reasoning-select";
 import { defaultReasoningLabel } from "@/lib/reasoning";
 import { TeamAnalysts } from "@/components/team-analysts";
 import { SubagentSwitch } from "@/components/subagent-switch";
+import { MemberRunSettings } from "@/components/member-run-settings";
 
 const hint = "type-meta mt-1 text-muted";
 
@@ -108,7 +109,10 @@ export function ProjectTeamTab({ projectId, team, readiness, models = null }: {
           onChange={() => setPicker({ kind: "change", assignment })}
           onDisable={() => submit(`disable:${assignment.assignmentId}`, { kind: "team_disable_executor", assignmentId: assignment.assignmentId })}
           subagents={assignment.roleKey === "executor" ? team.subagents[assignment.assignmentId] === true : null}
-          onSubagents={(enabled) => submit(`subagents:${assignment.assignmentId}`, { kind: "team_set_subagents", memberId: assignment.assignmentId, enabled })}/>)}
+          onSubagents={(enabled) => submit(`subagents:${assignment.assignmentId}`, { kind: "team_set_subagents", memberId: assignment.assignmentId, enabled })}
+          runSettings={assignment.roleKey === "executor" ? <MemberRunSettings memberId={assignment.assignmentId} runtime={assignment.runtime}
+            modelId={assignment.modelId} settings={team.runSettings[assignment.assignmentId]} models={team.models} busy={busy}
+            onSave={(next) => submit(`run:${assignment.assignmentId}`, { kind: "team_set_run_settings", memberId: assignment.assignmentId, ...next })}/> : null}/>)}
       </ul>
 
       {picker?.kind === "change" && <TeamModelPicker key={picker.assignment.assignmentId} team={team} models={models} mode={picker}
@@ -154,11 +158,11 @@ export function ProjectTeamTab({ projectId, team, readiness, models = null }: {
   </div>;
 }
 
-function AssignmentRow({ assignment, resolved, readiness, busy, executorCount, picking, reasoning, levels, onLevel, onChange, onDisable, subagents, onSubagents }: {
+function AssignmentRow({ assignment, resolved, readiness, busy, executorCount, picking, reasoning, levels, onLevel, onChange, onDisable, subagents, onSubagents, runSettings }: {
   assignment: TeamAssignment; resolved: string | null; readiness: ProjectReadiness | null; busy: string; executorCount: number; picking: boolean;
   reasoning: TeamReasoning["members"][string] | null; levels: TeamReasoning["models"][string] | null;
   onLevel: (level: string) => void; onChange: () => void; onDisable: () => void;
-  subagents: boolean | null; onSubagents: (enabled: boolean) => void;
+  subagents: boolean | null; onSubagents: (enabled: boolean) => void; runSettings: React.ReactNode;
 }) {
   const orchestrator = assignment.roleKey === "orchestrator";
   const state = readiness?.assignments.find((row) => row.assignmentId === assignment.assignmentId);
@@ -192,6 +196,7 @@ function AssignmentRow({ assignment, resolved, readiness, busy, executorCount, p
       </p>}
     </div>}
     {subagents !== null && <SubagentSwitch memberId={assignment.assignmentId} allowed={subagents} busy={busy} onChange={onSubagents}/>}
+    {runSettings}
     {state?.blockedBy && <p className={hint}>Not ready: {state.blockedBy.message}</p>}
     <div className="mt-2 flex flex-wrap items-center gap-2">
       <Button variant="secondary" size="sm" disabled={Boolean(busy)} aria-expanded={picking} onClick={onChange}>

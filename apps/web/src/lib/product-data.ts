@@ -1484,7 +1484,8 @@ export async function getProjectTeam(projectId: string, ownerId: string): Promis
   const rows = await queryJsonRows(`SELECT (project_team(:'project_id'::uuid,:'owner_id'::uuid)
       || jsonb_build_object('reasoning',project_team_reasoning(:'project_id'::uuid,:'owner_id'::uuid),
         'analysts',project_analyst_list(:'project_id'::uuid,:'owner_id'::uuid),
-        'subagents',project_member_subagents(:'project_id'::uuid,:'owner_id'::uuid)))::text;`,
+        'subagents',project_member_subagents(:'project_id'::uuid,:'owner_id'::uuid),
+        'run_settings',project_member_run_settings(:'project_id'::uuid,:'owner_id'::uuid)))::text;`,
     { project_id: projectId, owner_id: ownerId });
   return rows[0] ? projectTeamFromRow(rows[0]) : null;
 }

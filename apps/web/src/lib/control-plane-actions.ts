@@ -903,6 +903,21 @@ export async function performControlPlaneAction(body: Record<string, unknown>, o
         member_id: uuid(body.memberId, "memberId"), enabled: String(body.enabled === true), actor, correlation },
     );
   }
+  // rc.142 (0152): one executor's or analyst's token limit per run and its
+  // fallback model, set together; empty is none.
+  if (kind === "team_set_run_settings") {
+    const limit = body.tokenLimit === null || body.tokenLimit === "" || body.tokenLimit === undefined ? "" : Number(body.tokenLimit);
+    if (limit !== "" && !(Number.isInteger(limit) && limit >= 10_000 && limit <= 1_000_000_000)) {
+      throw new Error("A token limit per run is a whole number from 10 000 to 1 000 000 000, or empty for none");
+    }
+    const fallback = body.fallbackEntryId ? uuid(body.fallbackEntryId, "fallbackEntryId") : "";
+    return executeJson(
+      `SELECT set_project_member_run_settings(:'project_id'::uuid,:'owner_id'::uuid,:'version'::bigint,:'member_id'::uuid,
+        NULLIF(:'token_limit','')::bigint,NULLIF(:'fallback_entry_id','')::uuid,:'actor',:'correlation')::text;`,
+      { project_id: ownedProjectId, owner_id: operator.userId, version: String(version(body.teamVersion)),
+        member_id: uuid(body.memberId, "memberId"), token_limit: String(limit), fallback_entry_id: fallback, actor, correlation },
+    );
+  }
   // The owner stops a question an analyst is still reading.
   if (kind === "consultation_stop") {
     return executeJson(

@@ -40,7 +40,12 @@ export type ProjectTeam = {
   models: TeamModel[]; heldBack: TeamHeldBack[]; reasoning: TeamReasoning; analysts: TeamAnalyst[];
   // M7 (0151): each executor's and analyst's own subagents, by member id.
   subagents: Record<string, boolean>;
+  // rc.142 (0152): each executor's and analyst's token limit per run and
+  // fallback model, by member id.
+  runSettings: Record<string, MemberRunSettings>;
 };
+
+export type MemberRunSettings = { tokenLimit: number | null; fallbackEntryId: string | null; fallbackModel: string | null };
 
 const strings = (value: unknown) => (Array.isArray(value) ? value.map(String) : []);
 const text = (value: unknown) => (typeof value === "string" ? value : "");
@@ -86,6 +91,16 @@ export function projectTeamFromRow(row: Json): ProjectTeam {
     reasoning: teamReasoningFrom(row.reasoning),
     subagents: Object.fromEntries(Object.entries(row.subagents && typeof row.subagents === "object" ? row.subagents as Json : {})
       .map(([id, allowed]) => [id, allowed === true])),
+    runSettings: Object.fromEntries(Object.entries(row.run_settings && typeof row.run_settings === "object" ? row.run_settings as Json : {})
+      .map(([id, value]) => {
+        const settings = value && typeof value === "object" ? value as Json : {};
+        const limit = Number(settings.run_token_limit);
+        return [id, {
+          tokenLimit: Number.isInteger(limit) && limit > 0 ? limit : null,
+          fallbackEntryId: typeof settings.fallback_entry_id === "string" ? settings.fallback_entry_id : null,
+          fallbackModel: typeof settings.fallback_model === "string" ? settings.fallback_model : null,
+        }];
+      })),
     analysts: list("analysts").map((analyst) => ({
       id: text(analyst.id), name: text(analyst.name), instructions: text(analyst.instructions), runtime: text(analyst.runtime_type),
       entryId: text(analyst.entry_id), modelId: text(analyst.model_id), displayName: text(analyst.display_name),
