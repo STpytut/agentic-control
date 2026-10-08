@@ -13,8 +13,9 @@
 SET search_path TO control_plane, public, extensions;
 
 INSERT INTO failure_reasons(reason, code, note) VALUES
-  ('workspace_sync_unsupported','failed_precondition','only a project cloned through the GitHub App is synced with GitHub'),
-  ('workspace_sync_not_held','lease_lost','this worker does not hold the workspace sync')
+  ('workspace_sync_unsupported','conflict','only a project cloned through the GitHub App is synced with GitHub'),
+  ('workspace_sync_not_held','lease_lost','this worker does not hold the workspace sync'),
+  ('workspace_sync_busy','conflict','a sync of this workspace is running; ask again when it has finished')
 ON CONFLICT (reason) DO NOTHING;
 
 CREATE TABLE workspace_syncs (
@@ -40,6 +41,18 @@ CREATE TABLE workspace_syncs (
 CREATE UNIQUE INDEX workspace_syncs_one_open ON workspace_syncs(project_id) WHERE status IN ('requested','claimed');
 CREATE INDEX workspace_syncs_recent ON workspace_syncs(project_id, requested_at DESC);
 
+-- Whether a run is in the workspace: an implementation holding its lock, or a
+-- turn reading it under a live grant (a planning or review turn). A sync never
+-- moves the tree under either.
+CREATE FUNCTION workspace_in_use(p_project_id uuid)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path TO control_plane, public, extensions, pg_temp
+AS $$
+  SELECT EXISTS (SELECT 1 FROM workspace_locks l WHERE l.project_id=p_project_id AND l.status='held')
+      OR EXISTS (SELECT 1 FROM workspace_access_grants g WHERE g.project_id=p_project_id
+                 AND g.revoked_at IS NULL AND g.expires_at > clock_timestamp());
+$$;
+
 -- A sync for the project, unless one is already open; a reset asked by the
 -- owner replaces an open plain sync. Only GitHub App projects.
 CREATE FUNCTION enqueue_workspace_sync(p_project_id uuid, p_mode text, p_requested_by text)
@@ -52,16 +65,20 @@ BEGIN
   IF NOT FOUND OR v_project.credential_mode <> 'github_app' OR v_project.status IN ('archived','deleting','deletion_failed','deleted') THEN
     RETURN NULL;
   END IF;
-  SELECT id INTO v_id FROM workspace_syncs WHERE project_id=p_project_id AND status IN ('requested','claimed') FOR UPDATE;
-  IF FOUND THEN
-    IF p_mode = 'reset' THEN
-      UPDATE workspace_syncs SET mode='reset', requested_by=p_requested_by WHERE id=v_id AND status='requested';
-    END IF;
-    RETURN v_id;
-  END IF;
+  -- Two first tasks at once must not collide on the one-open index: the
+  -- second finds the first's row instead of raising.
   INSERT INTO workspace_syncs(project_id, mode, requested_by, base_branch)
   VALUES (p_project_id, p_mode, p_requested_by, COALESCE(NULLIF(v_project.default_branch,''),'main'))
+  ON CONFLICT (project_id) WHERE status IN ('requested','claimed') DO NOTHING
   RETURNING id INTO v_id;
+  IF v_id IS NOT NULL THEN RETURN v_id; END IF;
+  SELECT id INTO v_id FROM workspace_syncs WHERE project_id=p_project_id AND status IN ('requested','claimed') FOR UPDATE;
+  IF p_mode = 'reset' THEN
+    UPDATE workspace_syncs SET mode='reset', requested_by=p_requested_by WHERE id=v_id AND status='requested';
+    IF NOT FOUND THEN
+      PERFORM refuse('workspace_sync_busy', 'a sync of this workspace is running; ask for the reset when it has finished');
+    END IF;
+  END IF;
   RETURN v_id;
 END $$;
 
@@ -71,7 +88,11 @@ RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER
 SET search_path TO control_plane, public, extensions, pg_temp
 AS $$
 BEGIN
-  PERFORM enqueue_workspace_sync(NEW.project_id, 'sync', 'chat-start');
+  -- A sync is a convenience; it never vetoes a task.
+  BEGIN
+    PERFORM enqueue_workspace_sync(NEW.project_id, 'sync', 'chat-start');
+  EXCEPTION WHEN OTHERS THEN NULL;
+  END;
   RETURN NULL;
 END $$;
 
@@ -122,11 +143,15 @@ SET search_path TO control_plane, public, extensions, pg_temp
 AS $$
 DECLARE v_sync workspace_syncs%ROWTYPE; v_project projects%ROWTYPE;
 BEGIN
+  -- A claim whose lease ran out is offered again, three times in all; then it
+  -- is failed, so a sync that keeps breaking does not hold every new chat's.
+  UPDATE workspace_syncs SET status='failed', finished_at=clock_timestamp(), leased_by=NULL, leased_until=NULL,
+    outcome=COALESCE(outcome, 'the sync did not finish after three attempts')
+  WHERE status='claimed' AND leased_until < clock_timestamp() AND attempts >= 3;
   UPDATE workspace_syncs SET status='requested', leased_by=NULL, leased_until=NULL
   WHERE status='claimed' AND leased_until < clock_timestamp();
   SELECT s.* INTO v_sync FROM workspace_syncs s
-  WHERE s.status='requested'
-    AND NOT EXISTS (SELECT 1 FROM workspace_locks l WHERE l.project_id=s.project_id AND l.status='held')
+  WHERE s.status='requested' AND NOT workspace_in_use(s.project_id)
   ORDER BY s.requested_at LIMIT 1 FOR UPDATE SKIP LOCKED;
   IF NOT FOUND THEN RETURN NULL; END IF;
   UPDATE workspace_syncs SET status='claimed', leased_by=p_worker_id, leased_until=clock_timestamp()+p_lease,
@@ -144,7 +169,7 @@ SET search_path TO control_plane, public, extensions, pg_temp
 AS $$
   SELECT jsonb_build_object('sync_id',s.id,'project_id',s.project_id,'workspace_path',p.workspace_path,
     'mode',s.mode,'base_branch',s.base_branch,
-    'run_holds_workspace',EXISTS (SELECT 1 FROM workspace_locks l WHERE l.project_id=s.project_id AND l.status='held'))
+    'run_holds_workspace',workspace_in_use(s.project_id))
   FROM workspace_syncs s JOIN projects p ON p.id=s.project_id
   WHERE s.id=p_sync_id AND s.status='claimed' AND s.leased_until > clock_timestamp();
 $$;
@@ -169,7 +194,7 @@ BEGIN
 END $$;
 
 REVOKE ALL ON workspace_syncs FROM PUBLIC;
-REVOKE ALL ON FUNCTION enqueue_workspace_sync(uuid,text,text), sync_on_new_chat(), request_workspace_sync(uuid,uuid,text),
+REVOKE ALL ON FUNCTION workspace_in_use(uuid), enqueue_workspace_sync(uuid,text,text), sync_on_new_chat(), request_workspace_sync(uuid,uuid,text),
   get_workspace_sync(uuid,uuid), claim_workspace_sync(text,interval), workspace_sync_target(uuid),
   finish_workspace_sync(uuid,jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION request_workspace_sync(uuid,uuid,text), get_workspace_sync(uuid,uuid) TO infra_web;

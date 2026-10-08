@@ -68,6 +68,14 @@ BEGIN
     RAISE EXCEPTION 'claim: %', v_claim;
   END IF;
   IF (workspace_sync_target(v_id)->>'workspace_path') <> '/srv/infra-cod/workspaces/sync' THEN RAISE EXCEPTION 'target'; END IF;
+  -- A reset asked while the sync is running is refused, not silently a plain sync.
+  BEGIN
+    UPDATE workspace_syncs SET mode='sync' WHERE id=v_id;
+    PERFORM request_workspace_sync(v_project, v_owner, 'reset');
+    RAISE EXCEPTION 'a reset during a running sync was taken as done';
+  EXCEPTION WHEN SQLSTATE '55000' THEN NULL;
+  END;
+  UPDATE workspace_syncs SET mode='reset' WHERE id=v_id;
   PERFORM finish_workspace_sync(v_id, '{"status":"synced","outcome":"reset to GitHub","backup_ref":"infra-cod/backup/x","after_sha":"abc"}');
   IF (get_workspace_sync(v_project, v_owner)->>'status') <> 'synced' OR (get_workspace_sync(v_project, v_owner)->>'backup_ref') <> 'infra-cod/backup/x' THEN
     RAISE EXCEPTION 'finished: %', get_workspace_sync(v_project, v_owner);

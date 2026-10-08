@@ -1,7 +1,8 @@
 import { execFileSync, spawn } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { chmod, chown, copyFile, lstat, mkdir, mkdtemp, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { constants as fsConstants, createWriteStream, readFileSync } from "node:fs";
+import { pipeline } from "node:stream/promises";
+import { chmod, chown, lstat, mkdir, mkdtemp, open, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -440,17 +441,37 @@ async function githubWorkspaceSync(request, action) {
   };
   if (!(await assertWorkspaceOnDisk(workspace))) return await finish({ status: "failed", outcome: "the workspace is not on disk" });
   const bundle = path.join(inbox, "origin.bundle");
-  try { await stat(bundle); } catch { return await finish({ status: "failed", outcome: "the broker left no bundle of GitHub's branch" }); }
   return await inWorkspaceTurn(workspace, async () => {
-    if ((await queryJson(`SELECT workspace_sync_target(:'id'::uuid)::text;`, { id: request.sync_id }))?.run_holds_workspace) {
-      return await finish({ status: "kept", outcome: "a run holds the workspace; the next chat syncs it" });
+    const current = await queryJson(`SELECT workspace_sync_target(:'id'::uuid)::text;`, { id: request.sync_id });
+    // The lease ran out while waiting for the turn: another claim owns it now.
+    if (!current) throw new Error("the workspace sync is no longer claimed");
+    if (current.run_holds_workspace) {
+      return await finish({ status: "kept", outcome: "a run is in the workspace; the next chat syncs it" });
     }
     const owner = inspectOwner((await stat(workspace)).uid, runtimeUid);
     const uid = runtimeUid(owner);
     const scratch = await mkdtemp(path.join(tmpdir(), "infra-cod-sync-"));
     try {
       const readable = path.join(scratch, "origin.bundle");
-      await copyFile(bundle, readable);
+      // The inbox is the broker's to write: what it left is opened without
+      // following a link and without blocking on a FIFO, and read only if it is
+      // a regular file the broker's group owns — root never copies a path the
+      // broker could point at /etc/shadow or another project.
+      let handle;
+      try {
+        handle = await open(bundle, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+      } catch {
+        return await finish({ status: "failed", outcome: "the broker left no bundle of GitHub's branch" });
+      }
+      try {
+        const info = await handle.stat();
+        if (!info.isFile() || info.gid !== githubBrokerGroupId || info.size > 2 * 1024 ** 3) {
+          return await finish({ status: "failed", outcome: "what the broker left is not a bundle file of its own" });
+        }
+        await pipeline(handle.createReadStream({ autoClose: false }), createWriteStream(readable, { mode: 0o600, flags: "wx" }));
+      } finally {
+        await handle.close();
+      }
       await chown(scratch, uid, (await stat(scratch)).gid);
       await chown(readable, uid, (await stat(readable)).gid);
       await chmod(scratch, 0o700);

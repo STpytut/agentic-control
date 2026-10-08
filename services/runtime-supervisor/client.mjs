@@ -434,8 +434,10 @@ export class RuntimeSupervisorClient extends EventEmitter {
     return this.#request(githubSyncRequest("prepare_workspace_sync", syncId));
   }
 
+  // Long enough for the supervisor's own git (120 s per command) and the
+  // wait for the workspace's turn.
   async applyWorkspaceSync({ syncId }) {
-    return this.#request(githubSyncRequest("apply_workspace_sync", syncId));
+    return this.#request(githubSyncRequest("apply_workspace_sync", syncId), 10 * 60_000);
   }
 
   async releaseWorkspaceSync({ syncId }) {

@@ -56,7 +56,7 @@ export default async function ProjectSettingsPage({ params, searchParams }: { pa
   if (!workspace) notFound();
   const { project } = workspace;
   // Only for a GitHub App project (0145); undefined hides the card.
-  const workspaceSync = page === "workspace" && project.repository.includes("github.com")
+  const workspaceSync = page === "workspace" && project.credentialMode === "github_app"
     ? await getWorkspaceSync(project.id, operator.userId).catch(() => null) : undefined;
   const deleting = ["deleting", "deletion_failed"].includes(project.status);
   if (current === "danger" && !deleting) redirect(`/projects/${project.id}/settings/general`);

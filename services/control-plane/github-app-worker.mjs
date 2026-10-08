@@ -662,7 +662,10 @@ export async function processWorkspaceSync(sync, {
     const applied = await supervisor.applyWorkspaceSync({ syncId: sync.sync_id });
     return { status: applied?.status ?? "unknown", outcome: applied?.outcome };
   } catch (error) {
-    if (!fetched) await finishFailed(said(error));
+    // Finished wherever it broke — after the fetch too, when the apply threw —
+    // so it is not left claimed and offered again; a sync the supervisor
+    // already finished refuses this, which is swallowed.
+    await finishFailed(said(error));
     return { status: "failed", error: said(error) };
   } finally {
     if (prepared) await supervisor.releaseWorkspaceSync({ syncId: sync.sync_id }).catch(() => undefined);
