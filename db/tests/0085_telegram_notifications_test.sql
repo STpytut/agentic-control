@@ -51,7 +51,13 @@ BEGIN
   PERFORM record_telegram_chat(v_owner, v_code, 42, '@owner');
   IF (get_telegram_connection(v_owner)->>'status') <> 'connected' THEN RAISE EXCEPTION 'not connected'; END IF;
 
-  -- The task waiting for approval queues one message, once per version.
+  -- The executor finishing is not the operator's turn yet: the review is.
+  UPDATE tasks SET status='awaiting_review' WHERE id=v_task;
+  IF EXISTS (SELECT 1 FROM notification_outbox WHERE operator_id=v_owner AND kind='approval') THEN
+    RAISE EXCEPTION 'an approval message before the review';
+  END IF;
+  -- The review approving it is: one message.
+  UPDATE tasks SET status='reviewing' WHERE id=v_task;
   UPDATE tasks SET status='awaiting_review' WHERE id=v_task;
   IF (SELECT count(*) FROM notification_outbox WHERE operator_id=v_owner AND kind='approval') <> 1 THEN
     RAISE EXCEPTION 'approval messages: %', (SELECT count(*) FROM notification_outbox WHERE operator_id=v_owner);
