@@ -563,6 +563,12 @@ function interactionMessage(event: EventSummary, sensitive: boolean): ChatMessag
     const action = typeof payload.requested_action === "string" && payload.requested_action.trim() ? `\n\n${payload.requested_action}` : "";
     return { ...base, role: "agent", author: actorName(event, "to", "The executor"), actorRole: "executor", runtime: runtimeOf(event, "to"), content: `Blocked: ${payload.reason}${action}` };
   }
+  // rc.148 (0156): the platform's policy hook refused a tool call (rc.144); kept
+  // in the chat, not only in the live feed that goes when the run ends.
+  if (event.eventType === "run.policy_refused") {
+    const tool = typeof payload.tool === "string" && payload.tool ? payload.tool : "a tool call";
+    return { ...base, role: "system", author: "", content: `Platform policy refused ${tool}: ${String(payload.reason ?? "no reason given")}` };
+  }
   // rc.146 (0154): the owner's message to the working executor, and whether it
   // reached the turn.
   if (event.eventType === "run.steer_requested" && typeof payload.text === "string") {
@@ -636,8 +642,13 @@ function interactionMessage(event: EventSummary, sensitive: boolean): ChatMessag
 export function conversationMessages(events: EventSummary[], task?: TaskSummary, projectId?: string): ChatMessage[] {
   let sensitive = false;
   const sides: Sides = { orchestrator: task?.orchestratorRuntime ? runtimeLabel(task.orchestratorRuntime) : "The orchestrator", executor: "the executor" };
-  // The resumed turn after an analyst's answer (0147) is not a review.
+  // The resumed turn after an analyst's answer (0147) is not a review — unless
+  // the question was asked while reviewing: then the turn that brings the
+  // answer gives the verdict (rc.146's live test showed the asking turn as
+  // the reviewer and the verdict as the orchestrator).
   let afterConsultation = false;
+  let reviewing = false;
+  let askedWhileReviewing = false;
   // A question still being read keeps its Stop; one answered or failed does not.
   const finished = new Set(events.filter((event) => event.eventType === "consultation.answered" || event.eventType === "consultation.failed")
     .map((event) => String((event.payload as Record<string, unknown>).consultation_id ?? "")));
@@ -657,7 +668,10 @@ export function conversationMessages(events: EventSummary[], task?: TaskSummary,
     if (actors.to_runtime) sides.executor = runtimeLabel(String(actors.to_runtime));
     const message = interactionMessage(event, sensitive) ?? messageFromEvent(event, task, { ...sides });
     // A pull request's review is its reviewer's, whatever came before it.
-    if (message.actorRole === "reviewer" && afterConsultation && !event.eventType.startsWith("pr_review.")) message.actorRole = "orchestrator";
+    if (message.actorRole === "reviewer" && afterConsultation && !askedWhileReviewing && !event.eventType.startsWith("pr_review.")) message.actorRole = "orchestrator";
+    if (event.eventType === "consultation.requested") askedWhileReviewing = reviewing;
+    if (event.eventType === "implementation.completed" || event.eventType === "revision.completed") reviewing = true;
+    if (["implementation.requested", "chat.user_message", "review.approved", "changes.requested"].includes(event.eventType)) reviewing = false;
     if (message.publishReview) {
       if (posted.has(message.publishReview.reviewId) || !projectId) delete message.publishReview;
       else message.publishReview.projectId = projectId;

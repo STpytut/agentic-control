@@ -263,6 +263,9 @@ async function publish(intent, workspace, token, overrides = {}) {
     push: (options) => pushApprovedCommit({ ...options, allowHttp: true, tmpRoot: dir }),
     openPullRequest: (options) => createPullRequest({ ...options, fetchImpl: apiFetch }),
     remoteUrlFor: () => remoteUrl(),
+    // rc.148: earlier pull requests are asked of GitHub; here nothing is stacked.
+    isAncestor: async () => false,
+    readPullRequest: async () => ({ state: "closed" }),
     ...overrides,
   });
   return { result, supervisor };

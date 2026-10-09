@@ -404,6 +404,10 @@
     "0155_run_limit_stop.sql": {
       "previousReleaseCompatible": true,
       "note": "Adds finalize_over_limit_run only; the previous release never calls it and keeps retrying a run stopped at its limit as before."
+    },
+    "0156_live_test_findings.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds an AFTER INSERT trigger on runtime_activity_events for runtime.policy.refused, which records a chat event and never fails the insert, and earlier_published_intents; the previous release writes the same activity events and ignores the new chat event."
     }
   }
 }

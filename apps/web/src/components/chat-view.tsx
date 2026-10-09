@@ -138,7 +138,9 @@ export function ChatView({ operator, workspace, activeTask, writeEnabled, view, 
           <Badge tone={statusTone(activeTask.status)}>{chatStatusLabel(activeTask.status)}</Badge>
           <TaskTopbarActions>
             {writeEnabled && !CLOSED.includes(activeTask.status)
-              && <CloseTask projectId={project.id} taskId={activeTask.id} taskVersion={activeTask.version}/>}
+              && <CloseTask projectId={project.id} taskId={activeTask.id} taskVersion={activeTask.version}
+                unpublishedWork={workspace.events.some((event) => event.taskId === activeTask.id && event.eventType === "implementation.started")
+                  && !workspace.events.some((event) => event.taskId === activeTask.id && event.eventType.startsWith("publish.pushed"))}/>}
             {project.provisioningStatus === "failed" && <ProvisioningRetry projectId={project.id}/>}
           </TaskTopbarActions>
           <PanelToggle/>

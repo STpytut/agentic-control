@@ -258,6 +258,15 @@ export async function getPullRequest({ installationToken, repository, number, fe
     head_sha: String(pr?.head?.sha ?? ""), draft: pr?.draft === true };
 }
 
+// Whether `base` is in `head`'s history (rc.148): GitHub's compare says
+// "ahead" or "identical" when it is.
+export async function commitIsAncestor({ installationToken, repository, base, head, fetchImpl = fetch, secrets = [] }) {
+  const compared = await githubRequest(`/repos/${repository}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`, {
+    bearer: installationToken, fetchImpl, secrets: [...secrets, installationToken],
+  });
+  return ["ahead", "identical"].includes(String(compared?.status ?? ""));
+}
+
 // Open issues carrying one label (0132's intake). GitHub lists pull requests
 // among issues; those are left out. The author's association is what the
 // database decides trust on, so a row without one is not an issue to offer.

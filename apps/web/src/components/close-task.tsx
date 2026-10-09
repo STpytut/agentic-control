@@ -16,7 +16,9 @@ const quiet = "touch-target inline-flex h-9 items-center rounded-md px-3 text-[0
 // rather than a browser dialog: the second click says what closing does. The
 // database refuses while the task's work runs, at a version the heading no
 // longer shows, or for a stranger, and the refusal is shown as it came.
-export function CloseTask({ projectId, taskId, taskVersion }: { projectId: string; taskId: string; taskVersion: number }) {
+export function CloseTask({ projectId, taskId, taskVersion, unpublishedWork = false }: {
+  projectId: string; taskId: string; taskVersion: number; unpublishedWork?: boolean;
+}) {
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -51,6 +53,9 @@ export function CloseTask({ projectId, taskId, taskVersion }: { projectId: strin
     <button type="button" className={quiet} disabled={busy} aria-expanded={confirming} onClick={() => { setError(""); setConfirming(!confirming); }}>Archive chat</button>
     {confirming && <div className="absolute top-full right-0 z-40 mt-2 grid w-80 gap-2.5 rounded-lg border border-line bg-canvas p-3 text-ink shadow-popover phone:static phone:mt-1 phone:w-auto phone:border-0 phone:p-2 phone:shadow-none">
       <span className="type-meta text-muted">Queued work for it is dropped; running work must be stopped first.</span>
+      {/* rc.148: an executor that stopped may already have committed; archiving
+          does not undo that, and the next pull request would carry it. */}
+      {unpublishedWork && <span className="type-meta text-warning">An executor worked in this chat and nothing was published. Anything it committed stays in the workspace and goes into the next pull request — continue the chat to have it reviewed, or ask the next one to revert it.</span>}
       <div className="flex justify-end gap-1.5">
         <button type="button" className={secondary} disabled={busy} onClick={() => setConfirming(false)}>Keep</button>
         <button type="button" className={dangerOutlineClasses} disabled={busy} onClick={close}>{busy ? "Archiving…" : "Archive it"}</button>
