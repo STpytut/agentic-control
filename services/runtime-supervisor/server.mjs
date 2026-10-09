@@ -1278,6 +1278,7 @@ async function runConsultBatch(request, driver, control = new LaunchControl()) {
     const timer = setTimeout(() => { timedOut = true; terminate(); }, CONSULT_TIMEOUT_MS);
     // rc.142: the analyst's token limit per run, metered from its stream.
     const meter = createTokenMeter(driver.name, context.run_token_limit);
+    let sawConsultUsage = false;
     const collect = (target, chunk) => {
       const next = target + chunk;
       if (Buffer.byteLength(next) > 4 * 1024 * 1024) { outputExceeded = true; terminate(); }
@@ -1296,6 +1297,7 @@ async function runConsultBatch(request, driver, control = new LaunchControl()) {
         if (!parsed) continue;
         resolvedModel ??= driver.stream.resolvedModel?.(parsed.raw) ?? null;
         if (meter.add(parsed.raw)) terminate();
+        if (parsed.event?.eventType === "runtime.turn.usage") sawConsultUsage = true;
         // 0151: the analyst's activity under its job, as a turn's is: the
         // usage trigger counts its tokens from it.
         if (parsed.event) activity = activity.then(() => appendActivity(parsed.event)).catch(() => {});
@@ -1312,7 +1314,14 @@ async function runConsultBatch(request, driver, control = new LaunchControl()) {
     if (exitCode === READ_ONLY_LAUNCH_EXIT) throw new Error(`the read-only launch was refused: ${stderr.trim().split("\n").at(-1) ?? ""}`);
     if (outputExceeded) throw new Error("the analyst's output exceeded 4 MiB");
     if (timedOut) throw new Error(`the analyst ran past ${CONSULT_TIMEOUT_MS / 60_000} minutes and was ended`);
-    if (meter.exceeded && !interrupted) throw new Error(meter.describe());
+    if (meter.exceeded && !interrupted) {
+      // What it used is counted though the runtime never said (as an executor's, rc.146).
+      if (!sawConsultUsage) {
+        await appendActivity({ eventType: "runtime.turn.usage", phase: "finalizing", summary: "Stopped at the member's token limit",
+          details: { status: "stopped", reason: "token_limit", tokens: meter.tokens } }).catch(() => {});
+      }
+      throw new Error(meter.describe());
+    }
     return {
       exit_code: exitCode, signal, interrupted, response: driver.stream.answer(stdout),
       failure: driver.stream.failure?.(stdout) ?? "", stderr: stderr.slice(-2000),
@@ -2542,6 +2551,9 @@ async function runFencedBatch(request, driver, control = new LaunchControl()) {
   // that has reported is done whatever it spends on its closing message.
   const meter = createTokenMeter(driver.name, context.run_settings?.run_token_limit);
   let overLimit = false;
+  // Whether the runtime itself reported the run's usage (rc.146's live test:
+  // a run stopped at its limit never does, and recorded 0 tokens).
+  let sawUsage = false;
   // A run that has reported takes no more messages.
   reportGate.onAccepted = () => { endInput(); reportEnd.arm(); };
   if (reportGate.accepted) reportGate.onAccepted();
@@ -2601,6 +2613,7 @@ async function runFencedBatch(request, driver, control = new LaunchControl()) {
       // Written from a synchronous stdout handler, one per line, and read
       // back in order by the activity feed. psql was synchronous so ordering
       // was free; chaining keeps it without blocking the reader.
+      if (event?.eventType === "runtime.turn.usage") sawUsage = true;
       if (event) {
         activityChain = activityChain
           .then(() => queryJson(`SELECT append_runtime_activity_event(:'job_id'::bigint,:'worker_id',:'runtime_type',
@@ -2638,9 +2651,28 @@ async function runFencedBatch(request, driver, control = new LaunchControl()) {
         `runtime run exceeded ${Math.round(runTimeoutMs / 60_000)} minutes and was ended by the supervisor`,
       );
     }
-    if (overLimit && !interrupted) throw new Error(meter.describe());
     // The acknowledgement is written before the run is reported ended.
     await mailbox.stop();
+    // Stopped at the member's token limit: an end, not a fault to retry — a
+    // retry would spend the same again (rc.146's live test ran it three
+    // times). What it used is recorded from the meter when the runtime never
+    // said, and the worker asks the owner how to go on.
+    if (overLimit && !interrupted) {
+      if (!sawUsage) {
+        activityChain = activityChain.then(() => queryJson(`SELECT append_runtime_activity_event(:'job_id'::bigint,:'worker_id',:'runtime_type',
+          :'event_type',:'phase',:'summary',:'details'::jsonb)::text;`, {
+          job_id: request.job_id, worker_id: supervisorId, runtime_type: driver.name, event_type: "runtime.turn.usage",
+          phase: "finalizing", summary: "Stopped at the member's token limit",
+          details: JSON.stringify({ status: "stopped", reason: "token_limit", tokens: meter.tokens }),
+        })).catch(() => {});
+      }
+      await activityChain;
+      return {
+        exit_code: exitCode, signal, over_token_limit: true, token_limit_detail: meter.describe(),
+        tokens_metered: meter.total, token_limit: meter.limit, native_session_id: observedNativeSessionId,
+        stdout, stderr, pid: child.pid, process_ref: processRef, worker_owner_uid: workerOwnerUid,
+      };
+    }
     if (interrupted) return {
       exit_code: exitCode, signal, interrupted: true, native_session_id: observedNativeSessionId,
       stdout, stderr, pid: child.pid, process_ref: processRef, worker_owner_uid: workerOwnerUid,

@@ -173,6 +173,14 @@ async function executeJob(job, { workerId, lease, signal = null }) {
         terminalReportSessionId: implementationSessionId,
       }, finalizing);
     }
+    // rc.147: stopped at the member's token limit — the implementation or a
+    // finalisation turn — is an end, never retried (a retry spends the same
+    // again); the owner decides. A stopped run has no missing_terminal_report,
+    // so it is never asked to finalise either.
+    if (runtime.over_token_limit) {
+      return await queryJson(`SELECT finalize_over_limit_run(:'job_id'::bigint,:'worker_id',:'native_session_id',:'detail')::text;`,
+        { job_id: job.id, worker_id: workerId, native_session_id: implementationSessionId ?? "", detail: runtime.token_limit_detail ?? "" });
+    }
     if (runtime.interrupted) {
       return await queryJson(`SELECT finalize_runtime_interrupt(
         :'job_id'::bigint,:'worker_id',:'native_session_id'

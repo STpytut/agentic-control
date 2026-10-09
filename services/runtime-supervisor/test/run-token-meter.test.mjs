@@ -64,3 +64,17 @@ test("a switch to the fallback model is an activity event naming both models", (
   assert.match(event.summary, /switched to claude-haiku-5-5: claude-opus-9-9 was not available/);
   assert.equal(normalizeClaudeEvent({ type: "system", subtype: "model_fallback" }), null);
 });
+
+// rc.147: a run stopped at its limit never reaches the event its usage is
+// recorded from, so the meter's own count is recorded instead, by part.
+test("the meter keeps what it counted by part, in the usage events' shape", () => {
+  const meter = createTokenMeter("claude", 20_000);
+  meter.add(claudeMessage("m1", { input_tokens: 2, cache_creation_input_tokens: 3066, cache_read_input_tokens: 1729, output_tokens: 16 }));
+  meter.add(claudeMessage("m2", { input_tokens: 5, cache_creation_input_tokens: 100, cache_read_input_tokens: 20000, output_tokens: 40 }));
+  assert.equal(meter.exceeded, true);
+  assert.deepEqual(meter.tokens, { input: 7, output: 56, reasoning: 0, cache: { read: 21729, write: 3166 }, total: 24958 });
+  assert.equal(meter.tokens.total, meter.total);
+  const copy = meter.tokens;
+  copy.cache.read = 0;
+  assert.equal(meter.tokens.cache.read, 21729, "a copy, not the meter's own");
+});
