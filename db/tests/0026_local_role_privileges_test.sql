@@ -713,6 +713,10 @@ INSERT INTO infra_web_allowlist(signature) VALUES
   ('request_pr_review(p_project_id uuid, p_task_id uuid, p_owner_id uuid, p_pr_number integer, p_actor text)'),
   ('request_pr_review_publish(p_project_id uuid, p_owner_id uuid, p_review_id uuid, p_actor text)'),
   ('task_pr_reviews(p_project_id uuid, p_task_id uuid, p_owner_id uuid)'),
+  -- 0154 (rc.146): a message to the working executor, and whether one can be
+  -- sent now; each checks the owner itself.
+  ('task_steer_target(p_project_id uuid, p_task_id uuid, p_owner_id uuid)'),
+  ('request_executor_message(p_project_id uuid, p_task_id uuid, p_owner_id uuid, p_text text, p_idempotency_key text, p_actor text)'),
   -- 0088 (sprint C U1): read-only. The four readiness states of every
   -- assignment of a project, checking the owner itself; it reads
   -- provider_connections, which infra_web may not, so it is SECURITY DEFINER.

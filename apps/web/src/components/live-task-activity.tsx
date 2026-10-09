@@ -134,8 +134,45 @@ export function LiveTaskActivity({ projectId, taskId, initialActivity, awaitingR
       <p className="type-app-body mt-2 mb-2.5 text-ink/80">{activity?.detail ?? "Your message is durable and waiting to be routed to the agent."}</p>
       {!!activity?.events?.length && <ul className="type-meta mb-2.5 grid list-none gap-0.5 p-0 text-muted">{activity.events.slice(0,3).map((event) => <li key={event.id} className="before:mr-1.5 before:content-['›']">{event.summary}</li>)}</ul>}
       {interruptError && <p className="type-mono-small mb-2 text-danger">{interruptError}</p>}
+      {activity?.status === "in_flight" && activity.canSteer && <SteerExecutor projectId={projectId} taskId={taskId} name={activity.agentName}/>}
       {activity?.lastError && failed && <p className="type-mono-small mb-2 text-danger">{activity.lastError}</p>}
       <footer className="type-meta flex flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-line pt-2.5 text-muted"><span className={cx("h-1.5 w-1.5 rounded-full", tone === "failed" ? "bg-danger" : tone === "stalled" ? "bg-warning" : "bg-success animate-pulse motion-reduce:animate-none")}/><span>{connection}</span><span className="tabular-nums">{activity && !activity.active ? "Took" : "Elapsed"} {duration(startedAt,endedAt)}</span>{(activity?.attemptCount ?? 0) > 1 && <span>Attempt {activity?.attemptCount}</span>}{activity?.status === "in_flight" && activity.canInterrupt && <button className={cx(dangerOutlineClasses, "ml-auto")} disabled={interrupting} onClick={interrupt}>{interrupting ? "Stopping…" : "Stop run"}</button>}</footer>
     </div>
   </article>;
+}
+
+// rc.146 (0154): tell the executor something while it works, without waiting
+// for its turn to end. It takes the message at its next step; the chat shows
+// whether it arrived.
+function SteerExecutor({ projectId, taskId, name }: { projectId: string; taskId: string; name: string }) {
+  const router = useRouter();
+  const [text, setText] = useState("");
+  const [state, setState] = useState<"idle" | "sending" | "error">("idle");
+  const [error, setError] = useState("");
+  async function send() {
+    const message = text.trim();
+    if (!message) return;
+    setState("sending");
+    try {
+      const response = await fetch("/api/control-plane/actions", { method: "POST", headers: controlPlaneActionHeaders(),
+        body: JSON.stringify({ kind: "executor_message", projectId, taskId, text: message,
+          idempotencyKey: `steer:${crypto.randomUUID()}` }) });
+      const body = await response.json();
+      if (!response.ok || !body.ok) throw new Error(body.error ?? "The message was not sent");
+      setText("");
+      setState("idle");
+      router.refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "The message was not sent");
+      setState("error");
+    }
+  }
+  return <form className="mb-2.5 flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); void send(); }}>
+    <input className="type-meta h-9 min-w-0 flex-1 rounded-md border border-line bg-canvas px-3 text-ink" value={text} maxLength={8000}
+      placeholder={`Tell ${name} something while it works…`} aria-label={`Message to ${name} while it works`}
+      disabled={state === "sending"} onChange={(event) => { setText(event.target.value); if (state === "error") setState("idle"); }}/>
+    <button type="submit" className="type-meta h-9 shrink-0 rounded-md border border-line-strong px-3 font-medium text-ink hover:border-ink disabled:opacity-50"
+      disabled={!text.trim() || state === "sending"}>{state === "sending" ? "Sending…" : "Send"}</button>
+    {state === "error" && <span className="type-meta text-danger">{error}</span>}
+  </form>;
 }

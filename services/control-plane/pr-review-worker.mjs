@@ -24,12 +24,14 @@ const finish = (reviewId, workerId, result) => queryJson(
 // reason there is none, in the runtime's words where it gave some.
 export function reviewOutcome(result, model) {
   const review = String(result?.review ?? "").trim();
+  // rc.146: what the review used, counted in its chat whatever the outcome.
+  const tokens = result?.tokens && typeof result.tokens === "object" ? { tokens: result.tokens } : {};
   if (result?.exit_code === 0 && review) {
-    return { status: "reviewed", review, findings: Array.isArray(result.findings) ? result.findings : [], model };
+    return { status: "reviewed", review, findings: Array.isArray(result.findings) ? result.findings : [], model, ...tokens };
   }
   const reason = String(result?.failure || result?.stderr?.trim().split("\n").at(-1) || "").slice(0, 300);
   return { status: "failed", failure: review ? `the review ended with code ${result?.exit_code}${reason ? `: ${reason}` : ""}`
-    : `Codex gave no review${reason ? `: ${reason}` : ""}` };
+    : `Codex gave no review${reason ? `: ${reason}` : ""}`, ...tokens };
 }
 
 export async function executeReview(reviewId, { workerId, signal, supervisor = new RuntimeSupervisorClient(), db = queryJson } = {}) {

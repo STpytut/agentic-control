@@ -108,10 +108,53 @@ scp -q "$release/SHA256SUMS" "$release/SHA256SUMS.minisig" "$release/$tarball" "
 ssh "$host" "cd /root/releases/$version-linux-x64 && sha256sum -c SHA256SUMS"
 
 step "7/7 the update"
-ssh -o ServerAliveInterval=20 "$host" "infra-cod update \
-  --artifact /root/releases/$version-linux-x64/$tarball \
-  --checksums /root/releases/$version-linux-x64/SHA256SUMS \
-  --signature /root/releases/$version-linux-x64/SHA256SUMS.minisig \
-  --public-key /root/rehearsal/keys/infra-cod-release.pub"
+# The update runs on the host as a unit of its own, not in this connection:
+# rc.145's connection dropped right after the restart (the owner's VPN, as far
+# as the host could tell), and the update, a child of the SSH session, died
+# with it before its self-test. Here a dropped connection is asked again, and
+# the update's output is followed by journal cursor from where it stopped.
+unit="infra-cod-release-update-${version//[^0-9a-z]/-}"
+ssh "$host" "systemctl reset-failed $unit 2>/dev/null; systemctl stop $unit 2>/dev/null; \
+  systemd-run --unit=$unit --quiet --property=Type=exec --property=RemainAfterExit=yes \
+    --setenv=HOME=/root --setenv=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    /usr/local/bin/infra-cod update \
+      --artifact /root/releases/$version-linux-x64/$tarball \
+      --checksums /root/releases/$version-linux-x64/SHA256SUMS \
+      --signature /root/releases/$version-linux-x64/SHA256SUMS.minisig \
+      --public-key /root/rehearsal/keys/infra-cod-release.pub" \
+  || fail "the update could not be started on $host"
+cursor=""
+deadline=$((SECONDS + 45 * 60))
+gone=0
+while :; do
+  [ "$SECONDS" -lt "$deadline" ] || fail "the update on $host has not finished in 45 minutes; follow it: journalctl -u $unit -f"
+  if ! out=$(ssh -o ServerAliveInterval=20 -o ConnectTimeout=20 "$host" \
+      "journalctl -u $unit -o cat --no-pager --show-cursor ${cursor:+--after-cursor='$cursor'}; \
+       echo \"__state__ \$(systemctl show -p ActiveState --value $unit) \$(systemctl show -p SubState --value $unit) \$(systemctl show -p ExecMainStatus --value $unit)\""); then
+    echo "(the connection to $host dropped; the update goes on there — asking again)"
+    sleep 10
+    continue
+  fi
+  state=${out##*__state__ }
+  body=${out%__state__*}
+  next=$(printf '%s' "$body" | sed -n 's/^-- cursor: //p' | tail -1)
+  [ -n "$next" ] && cursor=$next
+  printf '%s' "$body" | grep -v '^-- cursor: ' | grep -v '^-- No entries --$' || true
+  read -r active sub status <<<"$state"
+  if [ "$active" = "active" ] && [ "$sub" = "exited" ]; then
+    [ "$status" = "0" ] || fail "the update ended with status $status on $host"
+    ssh "$host" "systemctl stop $unit" || true
+    break
+  fi
+  if [ "$active" = "failed" ]; then
+    ssh "$host" "systemctl reset-failed $unit" || true
+    fail "the update failed on $host (status $status); its log: journalctl -u $unit"
+  fi
+  # A unit that is gone — stopped by hand, or the host rebooted — is not one
+  # still starting: three answers in a row say so.
+  if [ "$active" != "active" ] && [ "$active" != "activating" ]; then gone=$((gone + 1)); else gone=0; fi
+  [ "$gone" -lt 3 ] || fail "the update unit on $host is ${active:-unknown}, not running and not finished; its log: journalctl -u $unit"
+  sleep 5
+done
 echo
 echo "$version is on $host. The tag $tag is local; push it only if this is a milestone."

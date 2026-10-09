@@ -268,6 +268,7 @@ export const claudeDriver = Object.freeze({
       "run.workspace_write": "Stage 12 X1 on the host: Bash in the sandbox shell ran a workspace script; the note beside the login was not there",
       "tools.worker_report": "claude-bridge.test.mjs: complete_task, report_blocker and request_user_input reach the run's socket in the gateway's shape",
       "account.login": "rc.123, 2.1.286 in a container: with no TTY `claude auth login` prints the authorize URL and reads the code from stdin; claude-account-channel.test.mjs",
+      "input.steer": "rc.146, 2.1.294 on the host: with --input-format stream-json a message written mid-turn was taken at the next model call, in the same turn; closing stdin after the result ended the process with 0",
     }),
   }),
 
@@ -284,6 +285,7 @@ export const claudeDriver = Object.freeze({
     "run.workspace_write": { by: "run", native: "`-p` with Read, Edit, Write and Bash pre-approved; Bash through CLAUDE_CODE_SHELL, the sandbox shell" },
     "tools.worker_report": { by: "toolBridge", native: "the MCP bridge's report tools (INFRA_BRIDGE_TOOLS=reports), calling the run's socket" },
     "account.login": { by: "input", native: "`claude auth login`: the authorize URL on stdout, the pasted code on stdin" },
+    "input.steer": { by: "input", native: "`--input-format stream-json` on a writing run: the owner's message as a user line on stdin, taken at the next model call" },
   }),
 
   surfaces: Object.freeze({
@@ -315,7 +317,7 @@ export const claudeDriver = Object.freeze({
     // its messages, not its system prompt, so a turn's instructions are not
     // piled up in the conversation and the prefix stays cached.
     argv: ({ model, sessionId = null, newSessionId = null, prompt, surface = "gate", reasoningEffort = null, subagents = false,
-      fallbackModel = null, systemPrompt = null }) => {
+      fallbackModel = null, systemPrompt = null, streamInput = false }) => {
       if (surface === "account") return ["auth", "login"];
       const surfaceArgs = SURFACE_ARGS[surface];
       if (!surfaceArgs) throw new Error(`Claude Code has no ${JSON.stringify(surface)} surface`);
@@ -328,7 +330,11 @@ export const claudeDriver = Object.freeze({
         ...(fallback ? ["--fallback-model", fallback] : []),
         ...(systemPrompt && surface !== "gate" ? ["--append-system-prompt", systemPrompt] : []),
         ...platformSubagents(surface, subagents),
-        "--output-format", "stream-json", "--verbose", "--model", model, prompt,
+        // rc.146: a writing run that takes the owner's messages while it works
+        // reads its prompt, and them, as stream-json lines on stdin.
+        ...(streamInput && surface === "task" ? ["--input-format", "stream-json"] : []),
+        "--output-format", "stream-json", "--verbose", "--model", model,
+        ...(streamInput && surface === "task" ? [] : [prompt]),
       ];
     },
     // A task's shell is the sandbox shell, with the login covered and the shell
@@ -344,7 +350,9 @@ export const claudeDriver = Object.freeze({
     // instead of failing runs once promoted. rc.142 added the last three.
     flags: Object.freeze(["--tools", "--allowedTools", "--disallowedTools", "--mcp-config", "--strict-mcp-config",
       "--permission-mode", "--setting-sources", "--session-id", "--resume", "--effort", "--output-format",
-      "--json-schema", "--fallback-model", "--no-session-persistence", "--append-system-prompt", "--agents", "--settings", "--include-hook-events"]),
+      "--json-schema", "--fallback-model", "--no-session-persistence", "--append-system-prompt", "--agents", "--settings", "--include-hook-events",
+      // rc.146: a writing run's input, streamed.
+      "--input-format"]),
     // The catalog holds Claude Code's own names for its models.
     qualifyModel: (_provider, model) => model,
   }),
@@ -380,6 +388,15 @@ export const claudeDriver = Object.freeze({
       throw new Error(`Claude Code has no channel on its ${surface} surface`);
     },
     observes: () => false,
+    // rc.146: a writing run's stdin, when it streams. The prompt is the first
+    // line, a steer each next one; the process ends when stdin is closed, so
+    // it is closed at the turn's result — a message already written is still
+    // read before the end, one written after is refused as too late.
+    stream: Object.freeze({
+      surfaces: Object.freeze(["task"]),
+      message: (text) => `${JSON.stringify({ type: "user", message: { role: "user", content: String(text) } })}\n`,
+      turnEnded: (raw) => raw?.type === "result",
+    }),
   }),
 
   interrupt: Object.freeze({

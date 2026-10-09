@@ -37,12 +37,13 @@ import { createWorkspaceSerializer, resolveWorkspaceGrant } from "./workspace-gr
 import { createDeprovisionDeadline, createProjectSingleFlight } from "./deprovision-bound.mjs";
 import { githubWorkspaceAction, isPublishAction, isReviewAction, isSyncAction } from "./github-workspace-protocol.mjs";
 import { parseReview } from "./pr-review-findings.mjs";
+import { reviewSessionUsage } from "./codex-session-usage.mjs";
 import { applyWorkspaceSync } from "./workspace-sync.mjs";
 import { buildRepositoryMap } from "./repository-map.mjs";
 import { buildSnapshot } from "./snapshot.mjs";
 import { CONSULT_NEXT } from "./drivers/tool-contracts.mjs";
 import { exportApprovedCommit } from "./publish-export.mjs";
-import { startMailbox } from "./run-mailbox.mjs";
+import { DeliveryOutcomeUnknown, startMailbox } from "./run-mailbox.mjs";
 import { ensureRunToolRoot, openRunToolSocket, sweepRunToolSockets } from "./worker-tool-socket.mjs";
 import { launchProvenance } from "./provenance.mjs";
 import { launchReasoningLevel } from "./drivers/reasoning.mjs";
@@ -1397,6 +1398,7 @@ async function reviewInScratch(request, driver, control, inbox) {
       model: driver.run.qualifyModel(null, context.model), surface: "review", baseBranch: context.base_ref,
       version: activeVersionOf(driver.name),
     }), driver.run.environment({ surface: "review" }));
+    const startedAt = new Date();
     leaf = await isolation.create(`review-${randomUUID()}`, runMemoryLimit(driver));
     child = isolation.launch(leaf, "/usr/sbin/runuser", args, { cwd: repo, stdio: ["ignore", "pipe", "pipe"] });
     const memory = watchMemory(leaf);
@@ -1422,8 +1424,11 @@ async function reviewInScratch(request, driver, control, inbox) {
     if (outputExceeded) throw new Error("the review's output exceeded 4 MiB");
     if (timedOut) throw new Error(`the review ran past ${REVIEW_TIMEOUT_MS / 60_000} minutes and was ended`);
     const parsed = parseReview(driver.stream.answer(stdout), { root: repo });
+    // rc.146: its tokens, from the review's own session files (the stream reports none).
+    const tokens = await reviewSessionUsage({ sessionsRoot: path.join(adapterFor(driver.name).home, ".codex", "sessions"),
+      cwd: repo, since: startedAt }).catch(() => null);
     return {
-      exit_code: exitCode, signal, interrupted, review: parsed.review, findings: parsed.findings,
+      exit_code: exitCode, signal, interrupted, review: parsed.review, findings: parsed.findings, tokens,
       failure: driver.stream.failure?.(stdout) ?? "", stderr: stderr.slice(-2000), head_sha: context.head_sha,
     };
   } finally {
@@ -2272,6 +2277,16 @@ async function runFencedBatch(request, driver, control = new LaunchControl()) {
     await closing.close();
   };
   let child = null;
+  // rc.146: a runtime that takes the owner's messages while it works reads its
+  // prompt, and them, from stdin; the input ends at the turn's result, after
+  // an accepted report, or when the run ends.
+  const streamSpec = driver.input.stream?.surfaces?.includes("task") ? driver.input.stream : null;
+  let inputEnded = false;
+  const endInput = () => {
+    if (!streamSpec || inputEnded || !child?.stdin) return;
+    inputEnded = true;
+    try { child.stdin.end(); } catch {}
+  };
   // The run's cgroup: made before the spawn, named for the run, removed in
   // this function's `finally` however the run ends.
   let leaf = null;
@@ -2446,6 +2461,7 @@ async function runFencedBatch(request, driver, control = new LaunchControl()) {
         version: activeVersionOf(driver.name),
         subagents: context.allow_subagents === true,
         fallbackModel: context.run_settings?.fallback_model ?? null,
+        streamInput: Boolean(streamSpec),
       }),
       [...driver.run.environment({
         surface: "task",
@@ -2458,12 +2474,17 @@ async function runFencedBatch(request, driver, control = new LaunchControl()) {
     leaf = await isolation.create(`task-${request.run_id}`, runMemoryLimit(driver));
     child = isolation.launch(leaf, "/usr/sbin/runuser", args, {
       cwd: context.workspace,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [streamSpec ? "pipe" : "ignore", "pipe", "pipe"],
     });
     await new Promise((resolve, reject) => {
       child.once("spawn", resolve);
       child.once("error", reject);
     });
+    if (streamSpec) {
+      // A runtime that exits early must not take the supervisor with it.
+      child.stdin.on("error", () => { inputEnded = true; });
+      child.stdin.write(streamSpec.message(request.prompt));
+    }
     if (!Number.isInteger(child.pid)) throw new Error("runtime child pid is unavailable");
     // A task run is the longest-lived of these, and the one most worth being
     // able to stop: the client's authority to be waiting on it is bounded by a
@@ -2521,8 +2542,9 @@ async function runFencedBatch(request, driver, control = new LaunchControl()) {
   // that has reported is done whatever it spends on its closing message.
   const meter = createTokenMeter(driver.name, context.run_settings?.run_token_limit);
   let overLimit = false;
-  reportGate.onAccepted = reportEnd.arm;
-  if (reportGate.accepted) reportEnd.arm();
+  // A run that has reported takes no more messages.
+  reportGate.onAccepted = () => { endInput(); reportEnd.arm(); };
+  if (reportGate.accepted) reportGate.onAccepted();
   // Serialises the activity-event writes issued from the stdout handler below.
   let activityChain = Promise.resolve();
   // The run's mailbox (WP-9a). This supervisor holds the job's lease, so it
@@ -2535,6 +2557,17 @@ async function runFencedBatch(request, driver, control = new LaunchControl()) {
     onCommand: (command) => { if (command.command_kind === "interrupt") interrupted = true; },
     deliver: {
       interrupt: async (command) => interruptRun({ command, leaf, child, childExit, terminate }),
+      // rc.146: the owner's message, into the turn that is running. Written
+      // is the receipt — the runtime takes it at its next model call; a turn
+      // that has ended refuses it, and nothing reached the runtime.
+      steer: async (command) => {
+        const text = String(command.payload?.text ?? "").trim().slice(0, 8000);
+        if (!text) throw new Error("the message is empty");
+        if (!streamSpec || inputEnded || !child.stdin?.writable) throw new Error("the executor had already finished its turn");
+        await new Promise((resolve, reject) => child.stdin.write(streamSpec.message(text), (error) => (error
+          ? reject(new DeliveryOutcomeUnknown(`writing the message failed: ${error.message}`)) : resolve())));
+        return { written: true, characters: text.length, at: new Date().toISOString() };
+      },
     },
   });
   const collect = (target, chunk) => {
@@ -2563,6 +2596,7 @@ async function runFencedBatch(request, driver, control = new LaunchControl()) {
       observedNativeSessionId ??= driver.sessions.idFromEvent(parsed.raw);
       resolvedModel ??= driver.stream.resolvedModel?.(parsed.raw) ?? null;
       if (meter.add(parsed.raw) && !reportGate.accepted) { overLimit = true; terminate(); }
+      if (streamSpec?.turnEnded(parsed.raw)) endInput();
       const { event } = parsed;
       // Written from a synchronous stdout handler, one per line, and read
       // back in order by the activity feed. psql was synchronous so ordering
