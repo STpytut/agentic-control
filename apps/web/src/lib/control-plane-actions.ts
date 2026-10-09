@@ -918,6 +918,23 @@ export async function performControlPlaneAction(body: Record<string, unknown>, o
         member_id: uuid(body.memberId, "memberId"), token_limit: String(limit), fallback_entry_id: fallback, actor, correlation },
     );
   }
+  // rc.145 (0153): a review of a pull request, asked from a chat, and its
+  // posting on GitHub — the database checks the owner, the repository and
+  // the team's Codex.
+  if (kind === "pr_review_request") {
+    const number = Number(body.prNumber);
+    if (!Number.isInteger(number) || number < 1 || number > 100_000_000) throw new Error("A pull request number is a positive whole number");
+    return executeJson(
+      `SELECT request_pr_review(:'project_id'::uuid,:'task_id'::uuid,:'owner_id'::uuid,:'pr_number'::integer,:'actor')::text;`,
+      { project_id: ownedProjectId, task_id: uuid(body.taskId, "taskId"), owner_id: operator.userId, pr_number: String(number), actor },
+    );
+  }
+  if (kind === "pr_review_publish") {
+    return executeJson(
+      `SELECT request_pr_review_publish(:'project_id'::uuid,:'owner_id'::uuid,:'review_id'::uuid,:'actor')::text;`,
+      { project_id: ownedProjectId, owner_id: operator.userId, review_id: uuid(body.reviewId, "reviewId"), actor },
+    );
+  }
   // The owner stops a question an analyst is still reading.
   if (kind === "consultation_stop") {
     return executeJson(

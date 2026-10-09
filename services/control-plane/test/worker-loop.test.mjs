@@ -154,6 +154,8 @@ test("no control-plane service runs a loop of its own", () => {
     // `consultation-worker.mjs` waits inside one analyst's run for memory to
     // free (0147), bounded by CAPACITY_WAIT_MS — not a poll loop either.
     if (name === "consultation-worker.mjs" && !/while \(!signal\?\.aborted\)|while \(!controller/.test(source)) continue;
+    // `pr-review-worker.mjs` likewise, inside one review's run (rc.145).
+    if (name === "pr-review-worker.mjs" && !/while \(!signal\?\.aborted\)|while \(!controller/.test(source)) continue;
     // `claude-login.mjs` waits inside one sign-in for the owner's code (rc.123),
     // bounded by the sign-in's expiry and stopped by the service's signal.
     if (name === "claude-login.mjs") continue;

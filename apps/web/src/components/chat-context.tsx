@@ -11,6 +11,7 @@ import { runtimeLabel } from "@/lib/runtime-labels";
 import { formatTimestamp } from "@/lib/format-timestamp";
 import { ReadinessBlockerNote } from "@/components/assignment-readiness";
 import { MemberTokens } from "@/components/chat-usage";
+import { PrReviewRequest } from "@/components/pr-review-request";
 
 // The context panel's three tabs (Stage 12 N3) and the long views they open in
 // the centre. Each tab is one compact view that fits the panel's height: what
@@ -86,6 +87,7 @@ export function TeamTab({ projectId, taskId, readiness, roster, team, models }: 
       <Link href={chatViewHref(projectId, taskId, "checks")} className={settingsLink}>Full list</Link>
     </p>}
     <Link href={`/projects/${projectId}/settings/team`} className={settingsLink}>Change the team in project settings →</Link>
+    <PrReviewRequest projectId={projectId} taskId={taskId}/>
   </div>;
 }
 

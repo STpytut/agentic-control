@@ -62,6 +62,8 @@ export const ROLE_CORE = Object.freeze({
   // Stage 12 (0147): reads a snapshot and answers once — no session to resume,
   // no tool to call, nothing to write.
   analyst: Object.freeze(["run.read_only", "stream.structured", "interrupt"]),
+  // rc.145 (0153): reviews a pull request in a scratch copy, read-only, once.
+  pr_reviewer: Object.freeze(["run.read_only", "stream.structured"]),
 });
 
 // Each problem as one sentence naming the driver and what it is missing, like

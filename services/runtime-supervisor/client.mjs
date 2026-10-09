@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 
 import { FAILURE_CODES, wrapFailure } from "../control-plane/failure.mjs";
 import { PROTOCOL_VERSION, createFrameReader, createFrameWriter, negotiatedVersion } from "./framing.mjs";
-import { githubPublishRequest, githubSyncRequest, githubWorkspaceRequest } from "./github-workspace-protocol.mjs";
+import { githubPublishRequest, githubReviewRequest, githubSyncRequest, githubWorkspaceRequest } from "./github-workspace-protocol.mjs";
 import { driverFor, surfaceOf } from "./drivers/index.mjs";
 
 // How long to wait for a run the supervisor is still executing.
@@ -44,11 +44,15 @@ const gateRequestTimeoutMs = 5 * 60_000 + 2 * 60_000;
 // supervisor's cap and this one have to move together (defect 98).
 // An analyst's run (0147): its 15 minutes, the snapshot and a margin.
 const snapshotRequestTimeoutMs = 20 * 60_000;
+// A pull request's review (rc.145): its 15 minutes, building the copy, a margin.
+const reviewRequestTimeoutMs = 20 * 60_000;
 
 const RUN_BUDGETS = Object.freeze({
   grant: runRequestTimeoutMs,
   gate: gateRequestTimeoutMs,
   snapshot: snapshotRequestTimeoutMs,
+  // A pull request's review (rc.145): its 15 minutes, the repository and a margin.
+  review: reviewRequestTimeoutMs,
 });
 
 // An account operation can start a loopback server and wait on a provider.
@@ -370,11 +374,13 @@ export class RuntimeSupervisorClient extends EventEmitter {
   // `systemPrompt` (rc.143): the role's instructions, apart from the message;
   // the driver says where they go. Not for a gate's smoke run.
   async run({ runtime, surface, jobId, runId, projectId, fencingToken, grantToken, gateWorkspace, prompt, model,
-    nativeSessionId = null, terminalReportSessionId = null, interruptAfterMs = null, workerId = null, systemPrompt = null }) {
+    nativeSessionId = null, terminalReportSessionId = null, interruptAfterMs = null, workerId = null, systemPrompt = null, reviewId = null }) {
     const spec = surfaceFor(runtime, surface, "batch");
     // An orchestrator's read-only turn (11.2 N4): the job and the worker that
     // leases it, and the prompt. The supervisor reads the rest from the job.
-    const message = spec.workspace === "snapshot"
+    const message = spec.workspace === "review"
+      ? { review_id: reviewId, worker_id: workerId }
+      : spec.workspace === "snapshot"
       ? { job_id: jobId, prompt, system_prompt: systemPrompt, worker_id: workerId }
       : spec.workspace === "grant" && spec.grantMode === "read_only"
       ? { job_id: jobId, project_id: projectId, grant_token: grantToken, prompt, system_prompt: systemPrompt, worker_id: workerId }
@@ -451,6 +457,15 @@ export class RuntimeSupervisorClient extends EventEmitter {
 
   async releaseWorkspaceSync({ syncId }) {
     return this.#request(githubSyncRequest("release_workspace_sync", syncId));
+  }
+
+  // rc.145: the inbox a pull request's bundle goes into, and its removal.
+  async preparePrReview({ reviewId }) {
+    return this.#request(githubReviewRequest("prepare_pr_review", reviewId));
+  }
+
+  async releasePrReview({ reviewId }) {
+    return this.#request(githubReviewRequest("release_pr_review", reviewId));
   }
 
   // An account operation on a runtime whose account surface is a loopback
