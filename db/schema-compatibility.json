@@ -396,6 +396,10 @@
     "0153_pr_reviews.sql": {
       "previousReleaseCompatible": true,
       "note": "Adds pr_reviews, five failure reasons and new functions only; the previous release neither asks for, claims nor shows pull request reviews, and its outbox router acknowledges the new event types without a job."
+    },
+    "0154_executor_live_input.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds a runtime capability row, two failure reasons, new functions, an AFTER UPDATE trigger on run_commands for steer commands (which the previous release never creates), and run_usage.pr_review_id with a widened source check that every row the previous release writes still satisfies; recreates finish_pr_review with the same signature and grants."
     }
   }
 }

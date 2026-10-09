@@ -97,7 +97,13 @@ BEGIN
   v_reason := pg_temp.reason_of(format($q$SELECT request_pr_review_publish(%L,%L,%L,'o')$q$, v_project, v_owner, v_review));
   IF v_reason IS DISTINCT FROM 'pr_review_not_ready' THEN RAISE EXCEPTION 'an unfinished review was posted: %', v_reason; END IF;
   PERFORM finish_pr_review(v_review, 'reviewer', jsonb_build_object('status','reviewed','review','One finding.',
-    'findings', jsonb_build_array(jsonb_build_object('priority','P1','title','Off by one','file','avg.js','line',3))));
+    'findings', jsonb_build_array(jsonb_build_object('priority','P1','title','Off by one','file','avg.js','line',3)),
+    'tokens', jsonb_build_object('input',14769,'cache_read',12800,'output',237,'reasoning',0)));
+  -- rc.146 (0154): its tokens count in its chat.
+  IF (SELECT total_tokens FROM run_usage WHERE pr_review_id = v_review) IS DISTINCT FROM 27806
+     OR (get_task_usage(v_project, v_task, v_owner)#>>'{totals,total_tokens}')::bigint IS DISTINCT FROM 27806 THEN
+    RAISE EXCEPTION 'the review''s tokens are not the chat''s: %', get_task_usage(v_project, v_task, v_owner)->'totals';
+  END IF;
   IF (SELECT status FROM pr_reviews WHERE id = v_review) <> 'reviewed' OR (SELECT jsonb_array_length(findings) FROM pr_reviews WHERE id = v_review) <> 1 THEN
     RAISE EXCEPTION 'the review was not recorded';
   END IF;

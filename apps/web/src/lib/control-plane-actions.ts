@@ -918,6 +918,17 @@ export async function performControlPlaneAction(body: Record<string, unknown>, o
         member_id: uuid(body.memberId, "memberId"), token_limit: String(limit), fallback_entry_id: fallback, actor, correlation },
     );
   }
+  // rc.146 (0154): the owner's message to the executor while it works.
+  if (kind === "executor_message") {
+    const text = typeof body.text === "string" ? body.text.trim() : "";
+    if (!text || text.length > 8000) throw new Error("A message to the executor is 1 to 8000 characters");
+    const key = typeof body.idempotencyKey === "string" && /^[A-Za-z0-9:_-]{8,200}$/.test(body.idempotencyKey) ? body.idempotencyKey : null;
+    if (!key) throw new Error("idempotencyKey is invalid");
+    return executeJson(
+      `SELECT request_executor_message(:'project_id'::uuid,:'task_id'::uuid,:'owner_id'::uuid,:'text',:'key',:'actor')::text;`,
+      { project_id: ownedProjectId, task_id: uuid(body.taskId, "taskId"), owner_id: operator.userId, text, key, actor },
+    );
+  }
   // rc.145 (0153): a review of a pull request, asked from a chat, and its
   // posting on GitHub — the database checks the owner, the repository and
   // the team's Codex.

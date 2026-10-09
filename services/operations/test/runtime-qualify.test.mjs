@@ -23,7 +23,9 @@ test("the suite is one check per capability the driver claims", () => {
     // Every capability a driver claims is covered by some check, or knowingly left to another.
     const covered = new Set(QUALIFICATION_CHECKS.map((check) => check.capability).filter(Boolean));
     const uncovered = Object.keys(driverFor(name).capabilities).filter((capability) => !covered.has(capability));
-    assert.deepEqual(uncovered.filter((capability) => !/^(sessions\.create|events\.raw|account\.)/.test(capability)), [], `${name}: ${uncovered}`);
+    // input.steer (rc.146): its flag is config.keys' — a version without
+    // --input-format fails there; the behaviour was shown on the host.
+    assert.deepEqual(uncovered.filter((capability) => !/^(sessions\.create|events\.raw|account\.|input\.steer$)/.test(capability)), [], `${name}: ${uncovered}`);
   }
 });
 

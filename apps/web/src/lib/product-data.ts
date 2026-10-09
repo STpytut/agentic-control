@@ -150,6 +150,8 @@ export type TaskActivity = {
   active: boolean;
   eventCursor: string;
   canInterrupt: boolean;
+  // rc.146 (0154): the executor working now takes the owner's messages.
+  canSteer: boolean;
   events: Array<{ id: string; eventType: string; summary: string; occurredAt: string }>;
 };
 
@@ -560,6 +562,19 @@ function interactionMessage(event: EventSummary, sensitive: boolean): ChatMessag
   if (event.eventType === "implementation.blocked" && typeof payload.reason === "string") {
     const action = typeof payload.requested_action === "string" && payload.requested_action.trim() ? `\n\n${payload.requested_action}` : "";
     return { ...base, role: "agent", author: actorName(event, "to", "The executor"), actorRole: "executor", runtime: runtimeOf(event, "to"), content: `Blocked: ${payload.reason}${action}` };
+  }
+  // rc.146 (0154): the owner's message to the working executor, and whether it
+  // reached the turn.
+  if (event.eventType === "run.steer_requested" && typeof payload.text === "string") {
+    const to = typeof payload.runtime_type === "string" ? runtimeLabel(payload.runtime_type) : "the executor";
+    return { ...base, role: "user", author: "You", content: `To ${to}, while it works:\n\n${payload.text}` };
+  }
+  if (event.eventType === "run.steer_delivered") {
+    return { ...base, role: "system", author: "", content: "Your message was handed to the executor; it reads it at its next step." };
+  }
+  if (event.eventType === "run.steer_failed") {
+    const why = typeof payload.reason === "string" && payload.reason ? payload.reason : String(payload.status ?? "not delivered");
+    return { ...base, role: "system", author: "", notice: true, content: `Your message did not reach the executor: ${why}. Send it as a normal chat message instead.` };
   }
   // rc.145 (0153): a pull request's review by Codex — asked, read, answered,
   // posted. Said by the platform and by Codex, never by the orchestrator, and
@@ -1248,6 +1263,8 @@ export async function getTaskActivity(ownerId: string, projectId: string, taskId
   if (!rows.length) return null;
   const row = rows[0];
   const activityEvents = Array.isArray(row.events) ? row.events as Json[] : [];
+  const steer = await queryJsonRows(`SELECT COALESCE(task_steer_target(:'project_id'::uuid,:'task_id'::uuid,:'owner_id'::uuid),'null'::jsonb)::text;`,
+    { owner_id: ownerId, project_id: projectId, task_id: taskId }).catch(() => []);
   return {
     activityId: String(row.activity_id), source: String(row.source) as TaskActivity["source"],
     status: String(row.status), phase: String(row.phase), detail: String(row.detail),
@@ -1258,6 +1275,7 @@ export async function getTaskActivity(ownerId: string, projectId: string, taskId
     lastError: String(row.last_error ?? ""), active: Boolean(row.active),
     eventCursor: String(row.event_cursor ?? ""),
     canInterrupt: Boolean(row.can_interrupt),
+    canSteer: Boolean(steer[0] && typeof steer[0] === "object" && (steer[0] as Json).runtime_type),
     events: activityEvents.map((event) => ({ id: String(event.id), eventType: String(event.event_type),
       summary: String(event.summary), occurredAt: String(event.occurred_at) })),
   };

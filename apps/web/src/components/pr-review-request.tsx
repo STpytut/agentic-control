@@ -32,8 +32,9 @@ export function PrReviewRequest({ projectId, taskId }: { projectId: string; task
     <strong id="pr-review-title" className="type-meta font-semibold">Review a pull request</strong>
     <p className="type-meta text-muted">Codex reviews an open pull request of this repository. The review appears in this chat; you choose whether to post it on GitHub.</p>
     <form className="flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); if (valid) void request(); }}>
-      <TextInput aria-label="Pull request number" inputMode="numeric" placeholder="#12" className="w-24" value={number}
-        disabled={state === "sending"} onChange={(event) => { setNumber(event.target.value.trim()); setState("idle"); }}/>
+      {/* The design system's control is full width; its wrapper sets the width. */}
+      <div className="w-24 shrink-0"><TextInput aria-label="Pull request number" inputMode="numeric" placeholder="#12" value={number}
+        disabled={state === "sending"} onChange={(event) => { setNumber(event.target.value.trim()); setState("idle"); }}/></div>
       <Button type="submit" variant="secondary" size="sm" disabled={!valid || state === "sending"}>{state === "sending" ? "Asking…" : "Review"}</Button>
     </form>
     {state === "sent" && <p className="type-meta text-muted">Requested. Codex starts within a minute; follow it in the chat.</p>}
