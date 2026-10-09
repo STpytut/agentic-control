@@ -52,6 +52,9 @@ const ROUTE_TEST_DIST_DIR = ".next-route-test";
 //   "protected"             — requires a live session and the must-change fence
 //   "password-change"       — requires a live session, but is reachable *during*
 //                             the forced password change
+//   "host-token"            — no session: the host's own call with a one-time
+//                             token, on a path Caddy does not serve (the
+//                             post-update self-test, rc.128)
 // mutating: the handler changes state and therefore needs a CSRF token.
 const REGISTRY = {
   "page.tsx": { url: "/", kind: "page", access: "public" },
@@ -90,6 +93,7 @@ const REGISTRY = {
   "api/projects/[projectId]/activity/route.ts": { url: "/api/projects/:id/activity", kind: "route", access: "protected" },
   "api/projects/[projectId]/usage/route.ts": { url: "/api/projects/:id/usage", kind: "route", access: "protected" },
   "opencode-enroll/route.ts": { url: "/opencode-enroll", kind: "route", access: "protected" },
+  "api/control-plane/selftest/route.ts": { url: "/api/control-plane/selftest", kind: "route", access: "host-token" },
 };
 
 function discoverRoutes(directory = appDir, prefix = "") {
@@ -132,6 +136,13 @@ test("every protected entry point guards itself", () => {
         GUARDS.some((guard) => source.includes(guard)),
         `${file} serves a protected route but never calls a session guard`,
       );
+    }
+    if (entry.access === "host-token") {
+      assert.ok(source.includes("selftestAuthorized("), `${file} is the host's alone but never checks its token`);
+      // And the edge never serves it: the token is the second lock, not the first.
+      const caddy = readFileSync(path.join(root, "deploy/caddy/Caddyfile"), "utf8");
+      assert.match(caddy, new RegExp(`path ${entry.url.replace(/[/]/g, "\\/")}\\b[\\s\\S]*?respond @\\w+ 404`),
+        `${entry.url} is the host's alone but Caddy serves it`);
     }
     if (entry.mutating) {
       const check = entry.csrf === "preauth" ? "verifyLoginCsrf(" : "requireCsrf(";
