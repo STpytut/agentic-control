@@ -154,6 +154,9 @@ export function pullRequestTitle(intent, objective) {
   return String(intent.title ?? "").trim() || "Changes from infra-cod";
 }
 
+const stackedOn = (intent) => (Array.isArray(intent.stacked_on) ? intent.stacked_on : [])
+  .filter((pr) => Number.isInteger(pr?.number) && pr.number > 0).slice(0, 5);
+
 export function pullRequestBody(intent) {
   const criteria = Array.isArray(intent.acceptance_criteria) ? intent.acceptance_criteria : [];
   const summary = summaryText(intent.summary).trim();
@@ -164,6 +167,10 @@ export function pullRequestBody(intent) {
     ...(summary ? ["**What was done**", summary, ""] : []),
     // A chat started from an issue (0132): merging closes it (0133).
     ...(Number.isInteger(intent.issue_number) && intent.issue_number > 0 ? [`Closes #${intent.issue_number}`, ""] : []),
+    // rc.148: approved work is a chain in the workspace, so this branch also
+    // carries earlier pull requests still open; merged first, they leave only
+    // this one's change here.
+    ...(stackedOn(intent).length ? [`Includes the commits of ${stackedOn(intent).map((pr) => `#${pr.number}`).join(", ")}, not yet merged: merge ${stackedOn(intent).length === 1 ? "it" : "them"} first, and this pull request shows only its own change.`, ""] : []),
     "---",
     `Published by Agentic Control after the owner's approval. Commit \`${intent.head_commit_sha}\`, review evidence \`${intent.evidence_digest}\`.`,
   ];

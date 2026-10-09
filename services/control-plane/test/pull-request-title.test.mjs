@@ -17,3 +17,15 @@ test("without an objective the task's own title is kept", () => {
   assert.equal(pullRequestTitle({ title: "Short" }, "Do it"), "Short");
   assert.equal(pullRequestTitle({}, undefined), "Changes from infra-cod");
 });
+
+// rc.148: a pull request that carries an earlier one still open says so
+// (focus-timer #15 carried #14's commit).
+test("a pull request names the earlier ones still open whose commits it carries", async () => {
+  const { pullRequestBody } = await import("../github-publish.mjs");
+  const base = { objective: "Mention shortcuts", head_commit_sha: "abc", evidence_digest: "sha256:x" };
+  assert.doesNotMatch(pullRequestBody(base), /Includes the commits/);
+  assert.match(pullRequestBody({ ...base, stacked_on: [{ number: 14, url: "https://github.com/o/r/pull/14" }] }),
+    /\nIncludes the commits of #14, not yet merged: merge it first, and this pull request shows only its own change\.\n/);
+  assert.match(pullRequestBody({ ...base, stacked_on: [{ number: 14 }, { number: 12 }, { number: "x" }] }),
+    /Includes the commits of #14, #12, not yet merged: merge them first/);
+});

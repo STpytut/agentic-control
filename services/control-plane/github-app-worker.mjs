@@ -40,7 +40,7 @@ import { PublishError, pullRequestBody, pullRequestTitle, pushApprovedCommit } f
 import { reviewComment } from "../runtime-supervisor/pr-review-findings.mjs";
 import {
   GithubAppError, createInstallationToken, createIssueComment, createPullRequest, decryptOAuthCode, exchangeOAuthCode, getAppIdentity, getInstallation, convertManifestCode,
-  getPullRequest,
+  getPullRequest, commitIsAncestor,
   listInstallationRepositories, listLabelledIssues, listUserInstallations, redactSecrets,
   revokeInstallationToken, revokeOAuthToken, sanitizeCloneUrl,
 } from "./github-app-client.mjs";
@@ -384,6 +384,8 @@ export async function processPublishIntent(intent, {
   push = pushApprovedCommit,
   openPullRequest = createPullRequest,
   remoteUrlFor = (item) => sanitizeCloneUrl(item.repository_url),
+  isAncestor = commitIsAncestor,
+  readPullRequest = getPullRequest,
 } = {}) {
   const secrets = [];
   let token = null;
@@ -443,12 +445,27 @@ export async function processPublishIntent(intent, {
     // first message does; the title falls back to the task's when there is none.
     const objective = await db(`SELECT jsonb_build_object('objective',h.objective)::text FROM handoffs h
       WHERE h.task_id=:'task_id'::uuid ORDER BY h.created_at DESC LIMIT 1;`, { task_id: intent.task_id }).catch(() => null);
+    // rc.148: the project's earlier pull requests still open whose commits
+    // this branch carries (focus-timer #15 carried #14's). Not knowing is
+    // saying nothing: the pull request is the same without the line.
+    const stackedOn = [];
+    try {
+      const earlier = await db(`SELECT earlier_published_intents(:'id'::uuid)::text;`, { id: intent.id });
+      for (const prior of Array.isArray(earlier) ? earlier : []) {
+        if (stackedOn.length >= 5) break;
+        try {
+          if (!(await isAncestor({ installationToken: token, repository: intent.repository_full_name, base: prior.sha, head: intent.head_commit_sha, secrets }))) continue;
+          const open = await readPullRequest({ installationToken: token, repository: intent.repository_full_name, number: prior.number, secrets });
+          if (open.state === "open") stackedOn.push({ number: Number(prior.number), url: prior.url });
+        } catch {}
+      }
+    } catch {}
     let pr;
     try {
       pr = await openPullRequest({
         installationToken: token, repository: intent.repository_full_name, head: intent.branch,
         base: intent.base_branch, title: pullRequestTitle(intent, objective?.objective),
-        body: pullRequestBody({ ...intent, issue_number: Number(issue?.number) || undefined }), secrets,
+        body: pullRequestBody({ ...intent, issue_number: Number(issue?.number) || undefined, stacked_on: stackedOn }), secrets,
       });
     } catch (error) {
       return await fail("publish_pull_request_failed", said(error));
