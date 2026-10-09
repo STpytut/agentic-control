@@ -194,7 +194,7 @@ test("the Codex driver launches one app-server, with the registry's configuratio
   assert.deepEqual(codex.run.argv(), ["-c", 'default_permissions="infra_cod_read_only"',
     "-c", 'permissions.infra_cod_read_only={extends=":read-only",filesystem={"~/.codex"="deny","/home/codex-worker/.codex"="deny"}}',
     "app-server", "--listen", "stdio://"]);
-  assert.deepEqual(Object.keys(codex.surfaces).sort(), ["account", "gate", "project", "task"]);
+  assert.deepEqual(Object.keys(codex.surfaces).sort(), ["account", "gate", "project", "review", "task"]);
   assert.equal(surfaceOf(codex, "project").grantMode, "read_only");
   // Two runtimes play the orchestrator since 11.2 N4: its job types and its
   // role no longer name one, and asking is refused, not answered with the

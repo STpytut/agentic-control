@@ -392,6 +392,10 @@
     "0152_member_run_limits.sql": {
       "previousReleaseCompatible": true,
       "note": "Adds nullable columns on project_analysts, two failure reasons, new functions and an AFTER INSERT trigger on runtime_activity_events for runtime.model.fallback, which the previous release never writes; recreates consultation_job_context with the same signature and grants, returning two more keys."
+    },
+    "0153_pr_reviews.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds pr_reviews, five failure reasons and new functions only; the previous release neither asks for, claims nor shows pull request reviews, and its outbox router acknowledges the new event types without a job."
     }
   }
 }

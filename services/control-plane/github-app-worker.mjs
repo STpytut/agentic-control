@@ -37,8 +37,10 @@ import { runPollLoop, shutdownSignal } from "./worker-loop.mjs";
 import { DEFAULT_APP_STATE_DIR, resolveAppConfig, writeAppSecrets } from "./github-app-config.mjs";
 import { INSTALLATION_LAYOUT } from "../operations/installation-layout.mjs";
 import { PublishError, pullRequestBody, pullRequestTitle, pushApprovedCommit } from "./github-publish.mjs";
+import { reviewComment } from "../runtime-supervisor/pr-review-findings.mjs";
 import {
   GithubAppError, createInstallationToken, createIssueComment, createPullRequest, decryptOAuthCode, exchangeOAuthCode, getAppIdentity, getInstallation, convertManifestCode,
+  getPullRequest,
   listInstallationRepositories, listLabelledIssues, listUserInstallations, redactSecrets,
   revokeInstallationToken, revokeOAuthToken, sanitizeCloneUrl,
 } from "./github-app-client.mjs";
@@ -684,6 +686,124 @@ export async function processWorkspaceSync(sync, {
   }
 }
 
+// ------------------------------------------------------------ rc.145 reviews
+
+async function mintReviewToken(item, permissions) {
+  if (!app.appId) throw new GithubAppError("invalid_config", "GitHub App ID is not configured on the VPS broker.");
+  loadPrivateKeyFromFile();
+  const response = await createInstallationToken({
+    appId: app.appId, privateKeyPem: privateKey(), installationId: item.installation_id,
+    repositoryIds: [item.github_repository_id], permissions,
+  });
+  return response.token;
+}
+
+// A pull request to review (0153): read with a read-only token; its head and
+// its base fetched into a throwaway bare repository in this process's private
+// /tmp and bundled into the inbox the supervisor made. Nothing here runs or
+// reads anything of the repository's: the review run builds its own copy.
+export async function processPrReviewFetch(item, {
+  worker = workerId,
+  db = queryJson,
+  mintToken = (review) => mintReviewToken(review, { contents: "read", pull_requests: "read", metadata: "read" }),
+  readPullRequest = getPullRequest,
+  revokeToken = (token, secrets) => revokeInstallationToken({ installationToken: token, secrets }),
+  supervisor = new RuntimeSupervisorClient({ socketPath: supervisorSocket }),
+  remoteUrlFor = (review) => sanitizeCloneUrl(review.repository_url),
+  runGit = (args, env) => execFileSync("/usr/bin/git", args, { encoding: "utf8", env, stdio: ["ignore", "pipe", "pipe"], timeout: cloneTimeoutMs, maxBuffer: 2 * 1024 * 1024 }),
+} = {}) {
+  const secrets = [];
+  let token = null;
+  let helper = null;
+  let connected = false;
+  let prepared = false;
+  const finish = (result) => db(`SELECT finish_pr_review_fetch(:'id'::uuid,:'worker',:'result'::jsonb)::text;`,
+    { id: item.review_id, worker, result: JSON.stringify(result) });
+  const fail = async (failure) => { await finish({ status: "failed", failure: String(failure).slice(0, 400) }).catch(() => undefined); return { status: "failed", failure }; };
+  try {
+    const remoteUrl = remoteUrlFor(item);
+    if (!remoteUrl || !item.installation_id || !item.github_repository_id) return await fail("the project has no GitHub connection to read from");
+    token = await mintToken(item);
+    secrets.push(token);
+    let pr;
+    try {
+      pr = await readPullRequest({ installationToken: token, repository: item.repository_full_name, number: item.pr_number, secrets });
+    } catch (error) {
+      return await fail(error instanceof GithubAppError && error.status === 404
+        ? `pull request #${item.pr_number} was not found in ${item.repository_full_name}`
+        : `reading pull request #${item.pr_number}: ${redactSecrets(error?.message ?? "GitHub did not answer", secrets)}`);
+    }
+    if (pr.state !== "open") return await fail(`pull request #${item.pr_number} is ${pr.state || "not open"}; only an open one is reviewed`);
+    // A branch name goes into a refspec: a plain one only.
+    if (!/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/.test(pr.base_ref) || pr.base_ref.includes("..") || pr.base_ref.endsWith(".lock")) {
+      return await fail(`the base branch of pull request #${item.pr_number} has a name the platform does not handle`);
+    }
+    await supervisor.connect();
+    connected = true;
+    const { inbox } = await supervisor.preparePrReview({ reviewId: item.review_id });
+    prepared = true;
+    helper = await createAskpassHelper(token);
+    const env = { PATH: process.env.PATH ?? "/usr/bin:/bin", GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: helper.helperFile,
+      GIT_CONFIG_NOSYSTEM: "1", HOME: helper.tempDir };
+    const bare = path.join(helper.tempDir, "review.git");
+    let headSha;
+    let baseSha;
+    try {
+      runGit(["init", "--bare", "--quiet", bare], env);
+      runGit(["-C", bare, "fetch", "--quiet", "--no-tags", remoteUrl,
+        `+refs/pull/${Number(item.pr_number)}/head:refs/heads/infra-review-head`, `+refs/heads/${pr.base_ref}:refs/heads/infra-review-base`], env);
+      headSha = runGit(["-C", bare, "rev-parse", "refs/heads/infra-review-head"], env).trim();
+      baseSha = runGit(["-C", bare, "rev-parse", "refs/heads/infra-review-base"], env).trim();
+      runGit(["-C", bare, "bundle", "create", "--quiet", path.join(inbox, "review.bundle"),
+        "refs/heads/infra-review-head", "refs/heads/infra-review-base"], env);
+    } catch (error) {
+      await supervisor.releasePrReview({ reviewId: item.review_id }).catch(() => undefined);
+      prepared = false;
+      return await fail(`reading GitHub: ${normalizeCloneError(String(error?.stderr ?? error?.message ?? ""), secrets)}`);
+    }
+    prepared = false;
+    await finish({ status: "fetched", title: pr.title, pr_url: pr.url, base_ref: pr.base_ref, base_sha: baseSha, head_sha: headSha });
+    return { status: "fetched", head_sha: headSha };
+  } catch (error) {
+    const said = redactSecrets(error instanceof Error ? error.message : String(error), secrets).slice(0, 400);
+    if (prepared) await supervisor.releasePrReview({ reviewId: item.review_id }).catch(() => undefined);
+    return await fail(said);
+  } finally {
+    if (connected) supervisor.close();
+    if (helper) await rm(helper.tempDir, { recursive: true, force: true }).catch(() => undefined);
+    if (token) await revokeToken(token, secrets).catch(() => undefined);
+    token = null;
+  }
+}
+
+// A finished review posted on its pull request (0153), on the owner's word:
+// one comment, said to be the platform's and Codex's.
+export async function processPrReviewPublish(item, {
+  db = queryJson,
+  mintToken = (review) => mintReviewToken(review, { pull_requests: "write", metadata: "read" }),
+  comment = createIssueComment,
+  revoke = revokeInstallationToken,
+} = {}) {
+  let token = "";
+  let url = "";
+  let error = null;
+  try {
+    if (!item.installation_id || !item.github_repository_id) throw new Error("the project has no GitHub connection to post with");
+    token = await mintToken(item);
+    const posted = await comment({ installationToken: token, repository: item.repository_full_name, number: item.pr_number,
+      body: reviewComment({ review: item.review, model: item.model, headSha: item.head_sha }) });
+    url = posted.url;
+  } catch (cause) {
+    const status = cause instanceof GithubAppError ? cause.status : undefined;
+    error = status === 403 ? "the GitHub App may not comment on pull requests in this repository (it needs Pull requests: write)"
+      : redactSecrets(cause?.message ?? "the review could not be posted", token ? [token] : []).slice(0, 400);
+  } finally {
+    if (token) await revoke({ installationToken: token }).catch(() => undefined);
+  }
+  return db(`SELECT finish_pr_review_publish(:'id'::uuid,NULLIF(:'url',''),NULLIF(:'error',''))::text;`,
+    { id: item.review_id, url, error: error ?? "" });
+}
+
 export async function runOnce() {
   const results = [];
   try {
@@ -728,6 +848,16 @@ export async function runOnce() {
   if (sync) {
     try { results.push({ kind: "workspace_sync", project_id: sync.project_id, result: await processWorkspaceSync(sync) }); }
     catch (error) { results.push({ kind: "workspace_sync", project_id: sync.project_id, error: redactSecrets(error?.message ?? "workspace sync failed") }); }
+  }
+  const review = await queryJson(`SELECT claim_pr_review_fetch(:'worker')::text;`, { worker: workerId });
+  if (review) {
+    try { results.push({ kind: "pr_review_fetch", review_id: review.review_id, result: await processPrReviewFetch(review) }); }
+    catch (error) { results.push({ kind: "pr_review_fetch", review_id: review.review_id, error: redactSecrets(error?.message ?? "pull request fetch failed") }); }
+  }
+  const post = await queryJson(`SELECT claim_pr_review_publish(:'worker')::text;`, { worker: workerId });
+  if (post) {
+    try { results.push({ kind: "pr_review_publish", review_id: post.review_id, result: await processPrReviewPublish(post) }); }
+    catch (error) { results.push({ kind: "pr_review_publish", review_id: post.review_id, error: redactSecrets(error?.message ?? "review publish failed") }); }
   }
   const projects = await queryJson(`SELECT claim_github_app_clone_projects(:'worker',3)::text;`, { worker: workerId });
   for (const project of Array.isArray(projects) ? projects : []) {

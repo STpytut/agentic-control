@@ -11,6 +11,7 @@ import { launchReasoningLevel } from "../runtime-supervisor/drivers/reasoning.mj
 import { runLeasedJob, runPollLoop, shutdownSignal } from "./worker-loop.mjs";
 import { describeConsultationResult, describeRepositoryContext, describeReviewEvidence, developerInstructionsFor, turnStateFor, workflowUpdates } from "./turn-prompts.mjs";
 import { runConsultationWorker } from "./consultation-worker.mjs";
+import { runPrReviewWorker } from "./pr-review-worker.mjs";
 
 // A review turn under either name until 11.2 N6 (migration 0073).
 const REVIEW_JOB_TYPES = new Set(["resume_orchestrator"]);
@@ -478,6 +479,8 @@ async function main() {
   await Promise.all([
     runOrchestratorWorker({ signal, once }),
     runConsultationWorker({ workerId: `${workerId}-consult`, signal, once }),
+    // rc.145: pull request reviews, on their own loop.
+    runPrReviewWorker({ workerId: `${workerId}-review`, signal, once }),
   ]);
 }
 

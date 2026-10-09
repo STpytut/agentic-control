@@ -708,6 +708,11 @@ INSERT INTO infra_web_allowlist(signature) VALUES
   -- and set on the Team page; each checks the owner itself.
   ('set_project_member_run_settings(p_project_id uuid, p_owner_id uuid, p_expected_version bigint, p_member_id uuid, p_token_limit bigint, p_fallback_entry_id uuid, p_actor text, p_correlation_id text)'),
   ('project_member_run_settings(p_project_id uuid, p_owner_id uuid)'),
+  -- 0153 (rc.145): a pull request's review, asked from a chat, its posting on
+  -- GitHub, and the chat's reviews; each checks the owner itself.
+  ('request_pr_review(p_project_id uuid, p_task_id uuid, p_owner_id uuid, p_pr_number integer, p_actor text)'),
+  ('request_pr_review_publish(p_project_id uuid, p_owner_id uuid, p_review_id uuid, p_actor text)'),
+  ('task_pr_reviews(p_project_id uuid, p_task_id uuid, p_owner_id uuid)'),
   -- 0088 (sprint C U1): read-only. The four readiness states of every
   -- assignment of a project, checking the owner itself; it reads
   -- provider_connections, which infra_web may not, so it is SECURITY DEFINER.

@@ -62,9 +62,10 @@ test("every long-running request waits on a named budget, not a literal", () => 
   assert.match(table, /grant: runRequestTimeoutMs,/, "a fenced task run waits on the supervisor's run cap");
   assert.match(table, /gate: gateRequestTimeoutMs,/, "a gate run waits on the gate's budget");
   assert.match(table, /snapshot: snapshotRequestTimeoutMs,/, "an analyst's run waits on its own budget (0147)");
+  assert.match(table, /review: reviewRequestTimeoutMs,/, "a pull request's review waits on its own budget (rc.145)");
   assert.doesNotMatch(table, /\d+ \* 60_000/, "a budget in the table is a literal");
   for (const surface of Object.values(driverFor("opencode").surfaces).concat(Object.values(driverFor("codex").surfaces))) {
-    if (surface.transport === "batch") assert.ok(["grant", "gate", "snapshot"].includes(surface.workspace), surface.workspace);
+    if (surface.transport === "batch") assert.ok(["grant", "gate", "snapshot", "review"].includes(surface.workspace), surface.workspace);
   }
   const start = source.indexOf("  async run({");
   assert.notEqual(start, -1, "run must exist");

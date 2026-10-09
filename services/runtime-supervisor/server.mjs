@@ -35,7 +35,8 @@ import { qualificationExecutable, qualificationPaths, scratchReadOnlyWritable, s
 import { INSTALLATION_LAYOUT } from "../operations/installation-layout.mjs";
 import { createWorkspaceSerializer, resolveWorkspaceGrant } from "./workspace-grant.mjs";
 import { createDeprovisionDeadline, createProjectSingleFlight } from "./deprovision-bound.mjs";
-import { githubWorkspaceAction, isPublishAction, isSyncAction } from "./github-workspace-protocol.mjs";
+import { githubWorkspaceAction, isPublishAction, isReviewAction, isSyncAction } from "./github-workspace-protocol.mjs";
+import { parseReview } from "./pr-review-findings.mjs";
 import { applyWorkspaceSync } from "./workspace-sync.mjs";
 import { buildRepositoryMap } from "./repository-map.mjs";
 import { buildSnapshot } from "./snapshot.mjs";
@@ -489,6 +490,69 @@ async function githubWorkspaceSync(request, action) {
       await rm(scratch, { recursive: true, force: true });
     }
   });
+}
+
+// rc.145 (0153): the inbox a pull request's bundle goes into. The broker, which
+// holds the token, writes the bundle; the review run reads it as data — a copy
+// opened without following links, fetched into a fresh repository as the
+// runtime's user — and removes the inbox. Nothing of the project's workspace
+// is read or written.
+const reviewInboxRoot = path.join(canonicalWorkspaceRoot, ".review");
+const reviewInboxOf = (reviewId) => {
+  if (!/^[0-9a-f-]{36}$/i.test(String(reviewId ?? ""))) throw new Error("invalid review id");
+  return path.join(reviewInboxRoot, String(reviewId).toLowerCase());
+};
+
+async function githubPrReviewInbox(request, action) {
+  const inbox = reviewInboxOf(request.review_id);
+  if (action === "review_release") {
+    await rm(inbox, { recursive: true, force: true });
+    return { released: true };
+  }
+  const target = await queryJson(`SELECT pr_review_inbox_target(:'id'::uuid)::text;`, { id: request.review_id });
+  if (!target) throw new Error("pr review authorization failed");
+  await mkdir(reviewInboxRoot, { recursive: true, mode: 0o711 });
+  await sweepReviewInboxes();
+  await chmod(reviewInboxRoot, 0o711);
+  await rm(inbox, { recursive: true, force: true });
+  await mkdir(inbox, { mode: 0o770 });
+  await chown(inbox, 0, githubBrokerGroupId);
+  await chmod(inbox, 0o770);
+  return { inbox };
+}
+
+// Inboxes of reviews no longer open — a broker that died mid-fetch, a review
+// failed by its expired leases — removed before a new one is made, so a
+// bundle of up to 2 GiB is not left on the host's disk.
+async function sweepReviewInboxes() {
+  try {
+    const ids = (await readdir(reviewInboxRoot)).filter((name) => /^[0-9a-f-]{36}$/.test(name));
+    if (!ids.length) return;
+    const open = new Set(await queryJson(`SELECT to_jsonb(pr_reviews_open(:'ids'::uuid[]))::text;`, { ids: `{${ids.join(",")}}` }) ?? []);
+    for (const id of ids) if (!open.has(id)) await rm(path.join(reviewInboxRoot, id), { recursive: true, force: true });
+  } catch (error) {
+    process.stderr.write(`${JSON.stringify({ type: "pr_review.sweep_failed", error: error.message })}\n`);
+  }
+}
+
+// A file the broker left in an inbox, copied to `target` — opened without
+// following a link or blocking on a FIFO, and only a regular file the
+// broker's group owns, so root never copies a path the broker pointed elsewhere.
+async function copyBrokerFile(source, target, { maxBytes = 2 * 1024 ** 3 } = {}) {
+  let handle;
+  try {
+    handle = await open(source, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+  } catch {
+    return false;
+  }
+  try {
+    const info = await handle.stat();
+    if (!info.isFile() || info.gid !== githubBrokerGroupId || info.size > maxBytes) return false;
+    await pipeline(handle.createReadStream({ autoClose: false }), createWriteStream(target, { mode: 0o600, flags: "wx" }));
+    return true;
+  } finally {
+    await handle.close();
+  }
 }
 
 // A published intent's refs, where the workspace looks for them: the publish
@@ -1261,6 +1325,115 @@ async function runConsultBatch(request, driver, control = new LaunchControl()) {
       });
     }
     await rm(snapshotDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+// A pull request's review (rc.145): Codex's review mode in a scratch
+// repository built from the broker's bundle — the pull request's head checked
+// out, its base as the branch it is compared with — as the runtime's user,
+// under Codex's read-only profile (drivers/codex.mjs says why not the
+// read-only launch). The worker's lease on the review is checked here.
+const REVIEW_TIMEOUT_MS = 15 * 60_000;
+const SHA = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+async function runReviewBatch(request, driver, control = new LaunchControl()) {
+  const spec = surfaceOf(driver, "review");
+  if (spec.transport !== "batch" || spec.workspace !== "review") throw new Error(`${driver.name}'s review surface is not a review batch run`);
+  assertCapability(driver, spec.capability);
+  if (typeof request.worker_id !== "string" || !request.worker_id) throw new Error("a review names the worker that leases it");
+  const inbox = reviewInboxOf(request.review_id);
+  // The inbox goes whatever happens from here: a review refused below is
+  // never run again (Fable's review of rc.145 found it left behind).
+  try {
+    return await reviewInScratch(request, driver, control, inbox);
+  } finally {
+    await rm(inbox, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function reviewInScratch(request, driver, control, inbox) {
+  const context = await queryJson(`SELECT pr_review_run_context(:'review_id'::uuid, :'worker_id')::text;`,
+    { review_id: request.review_id, worker_id: request.worker_id });
+  if (context.runtime_type !== driver.name) throw new Error(`review ${context.review_id} is ${context.runtime_type}'s, not ${driver.name}'s`);
+  if (context.model_status !== "verified") throw new Error(`the review's model ${context.model} is no longer verified`);
+  if (!SHA.test(String(context.head_sha)) || !SHA.test(String(context.base_sha))) throw new Error("the review has no commits to compare");
+  // The base branch's name, as GitHub gave it, goes into a refspec: a plain
+  // branch name only, never one that could be read as an option or a mapping.
+  if (!/^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/.test(String(context.base_ref)) || String(context.base_ref).includes("..")
+      || String(context.base_ref).endsWith(".lock") || String(context.base_ref).startsWith("infra-review-")) {
+    throw new Error("the review's base branch name cannot be used");
+  }
+  const account = adapterFor(driver.name).user;
+  const scratch = path.join(canonicalGateWorkspaceRoot, `review-${randomUUID()}`);
+  const repo = path.join(scratch, "repo");
+  await mkdir(scratch, { mode: 0o700 });
+  let leaf = null;
+  let child = null;
+  let stdout = "";
+  let stderr = "";
+  let outputExceeded = false;
+  let interrupted = false;
+  let timedOut = false;
+  try {
+    const bundle = path.join(scratch, "review.bundle");
+    if (!(await copyBrokerFile(path.join(inbox, "review.bundle"), bundle))) throw new Error("the broker left no bundle of the pull request");
+    transferOwnership(scratch, account);
+    const git = gitAs(account, scratch);
+    const step = async (args) => {
+      const result = await git(["-c", "core.hooksPath=/dev/null", ...args]);
+      if (result.code !== 0) throw new Error(`preparing the review: git ${args[0]} failed: ${String(result.stderr ?? "").trim().split("\n").at(-1) ?? ""}`);
+      return String(result.stdout ?? "").trim();
+    };
+    await step(["init", "-q", "-b", `infra-review-init-${randomUUID().slice(0, 8)}`, repo]);
+    await step(["-C", repo, "fetch", "-q", "--no-tags", bundle,
+      "+refs/heads/infra-review-head:refs/heads/infra-review-head", `+refs/heads/infra-review-base:refs/heads/${context.base_ref}`]);
+    await step(["-C", repo, "checkout", "-q", "infra-review-head"]);
+    if (await step(["-C", repo, "rev-parse", "HEAD"]) !== context.head_sha
+        || await step(["-C", repo, "rev-parse", `refs/heads/${context.base_ref}`]) !== context.base_sha) {
+      throw new Error("the bundle is not the pull request the review was asked for");
+    }
+    await rm(bundle, { force: true });
+    control.assertNotCancelled();
+    const args = cleanRuntimeArgs(account, repo, driver.executable, driver.run.argv({
+      model: driver.run.qualifyModel(null, context.model), surface: "review", baseBranch: context.base_ref,
+      version: activeVersionOf(driver.name),
+    }), driver.run.environment({ surface: "review" }));
+    leaf = await isolation.create(`review-${randomUUID()}`, runMemoryLimit(driver));
+    child = isolation.launch(leaf, "/usr/sbin/runuser", args, { cwd: repo, stdio: ["ignore", "pipe", "pipe"] });
+    const memory = watchMemory(leaf);
+    const terminate = (signal = "SIGTERM") => { isolation.signal(leaf, signal).catch(() => {}); };
+    control.bind(async () => { interrupted = true; await isolation.stop(leaf, { child }); });
+    const timer = setTimeout(() => { timedOut = true; terminate(); }, REVIEW_TIMEOUT_MS);
+    const collect = (target, chunk) => {
+      const next = target + chunk;
+      if (Buffer.byteLength(next) > 4 * 1024 * 1024) { outputExceeded = true; terminate(); }
+      return next;
+    };
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => (stdout = collect(stdout, chunk)));
+    child.stderr.on("data", (chunk) => (stderr = collect(stderr, chunk)));
+    const { exitCode, signal } = await new Promise((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", (exitCode, signal) => resolve({ exitCode, signal }));
+    });
+    clearTimeout(timer);
+    await memory?.stop().catch(() => null);
+    if (exitCode === READ_ONLY_LAUNCH_EXIT) throw new Error(`the read-only launch was refused: ${stderr.trim().split("\n").at(-1) ?? ""}`);
+    if (outputExceeded) throw new Error("the review's output exceeded 4 MiB");
+    if (timedOut) throw new Error(`the review ran past ${REVIEW_TIMEOUT_MS / 60_000} minutes and was ended`);
+    const parsed = parseReview(driver.stream.answer(stdout), { root: repo });
+    return {
+      exit_code: exitCode, signal, interrupted, review: parsed.review, findings: parsed.findings,
+      failure: driver.stream.failure?.(stdout) ?? "", stderr: stderr.slice(-2000), head_sha: context.head_sha,
+    };
+  } finally {
+    if (leaf) {
+      if (child) await isolation.stop(leaf, { child }).catch(() => {});
+      await isolation.release(leaf).catch((error) => {
+        process.stderr.write(`${JSON.stringify({ type: "run_cgroup.release_failed", cgroup: leaf.name, error: error.message })}\n`);
+      });
+    }
+    await rm(scratch, { recursive: true, force: true }).catch(() => {});
   }
 }
 
@@ -3179,6 +3352,7 @@ function runnerFor(request, driver) {
   }
   if (request.type === "runtime_run" && spec.transport === "batch" && spec.workspace === "gate") return runGateBatch;
   if (request.type === "runtime_run" && spec.transport === "batch" && spec.workspace === "snapshot") return runConsultBatch;
+  if (request.type === "runtime_run" && spec.transport === "batch" && spec.workspace === "review") return runReviewBatch;
   throw Object.assign(
     new Error(`${driver.name}'s ${request.surface} surface is carried by ${spec.transport}, not by ${request.type}`),
     { code: "unsupported_surface", retryable: false },
@@ -3351,7 +3525,9 @@ const githubBrokerServer = net.createServer((socket) => {
           ? await githubPublishExport(request, action)
           : isSyncAction(action)
             ? await githubWorkspaceSync(request, action)
-            : await githubAppWorkspace(request, action);
+            : isReviewAction(action)
+              ? await githubPrReviewInbox(request, action)
+              : await githubAppWorkspace(request, action);
         send(socket, { request_id: request.request_id, ok: true, result });
       } catch (error) {
         send(socket, { request_id: request?.request_id, ok: false, error: error.message });

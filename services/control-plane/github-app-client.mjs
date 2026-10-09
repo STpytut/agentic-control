@@ -243,6 +243,21 @@ export async function createPullRequest({ installationToken, repository, head, b
   }
 }
 
+// One pull request as a review needs it (rc.145): open or not, its title and
+// address, and the branch it goes into. The commits are read from the fetch,
+// not from here: a push between the two would otherwise be reviewed as the
+// older one.
+export async function getPullRequest({ installationToken, repository, number, fetchImpl = fetch, secrets = [] }) {
+  const pr = await githubRequest(`/repos/${repository}/pulls/${Number(number)}`, {
+    bearer: installationToken, fetchImpl, secrets: [...secrets, installationToken],
+  });
+  const parsed = parsePullRequest(pr);
+  const baseRef = String(pr?.base?.ref ?? "");
+  if (!baseRef) throw new GithubAppError("github_error", "GitHub returned a pull request without its base branch.");
+  return { ...parsed, state: String(pr?.state ?? ""), title: String(pr?.title ?? "").slice(0, 300), base_ref: baseRef,
+    head_sha: String(pr?.head?.sha ?? ""), draft: pr?.draft === true };
+}
+
 // Open issues carrying one label (0132's intake). GitHub lists pull requests
 // among issues; those are left out. The author's association is what the
 // database decides trust on, so a row without one is not an issue to offer.

@@ -110,7 +110,7 @@ test("each descriptor answers what the registry now promises", () => {
     assert.ok(adapter.display?.label, `${adapter.name} has no display label`);
     assert.ok(adapter.roles.length > 0, `${adapter.name} plays no role`);
     for (const role of adapter.roles) {
-      assert.ok(["orchestrator", "executor", "analyst"].includes(role), `${adapter.name} declares an unknown role ${role}`);
+      assert.ok(["orchestrator", "executor", "analyst", "pr_reviewer"].includes(role), `${adapter.name} declares an unknown role ${role}`);
       roles.set(role, [...(roles.get(role) ?? []), adapter.name]);
     }
     for (const type of adapter.dispatch.jobTypes) jobs.set(type, [...(jobs.get(type) ?? []), adapter.name]);
@@ -125,7 +125,7 @@ test("each descriptor answers what the registry now promises", () => {
       assert.ok(directory.startsWith(`${adapter.home}/`), `${adapter.name} backs up ${directory}, outside its home`);
     }
   }
-  assert.deepEqual([...roles.keys()].sort(), ["analyst", "executor", "orchestrator"], "a role has no runtime");
+  assert.deepEqual([...roles.keys()].sort(), ["analyst", "executor", "orchestrator", "pr_reviewer"], "a role has no runtime");
   // A type served by more than one runtime is chosen among by the task's
   // assignment (11.2 N4 for the orchestrator; Stage 12 X1 for the executor):
   // every runtime serving a type plays the role that type is for.

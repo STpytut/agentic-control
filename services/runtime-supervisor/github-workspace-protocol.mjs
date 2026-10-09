@@ -11,10 +11,15 @@ const ACTIONS = Object.freeze({
   prepare_workspace_sync: "sync_prepare",
   apply_workspace_sync: "sync_apply",
   release_workspace_sync: "sync_release",
+  // rc.145 (0153): a pull request's head and base, bundled by the broker into
+  // an inbox the supervisor makes for a review, which the review run reads.
+  prepare_pr_review: "review_prepare",
+  release_pr_review: "review_release",
 });
 
 const PUBLISH_ACTIONS = new Set(["publish_export", "publish_release"]);
 const SYNC_ACTIONS = new Set(["sync_prepare", "sync_apply", "sync_release"]);
+const REVIEW_ACTIONS = new Set(["review_prepare", "review_release"]);
 
 export function githubWorkspaceAction(type) {
   return ACTIONS[type] ?? null;
@@ -28,6 +33,15 @@ export function isSyncAction(action) {
   return SYNC_ACTIONS.has(action);
 }
 
+export function isReviewAction(action) {
+  return REVIEW_ACTIONS.has(action);
+}
+
+export function githubReviewRequest(type, reviewId) {
+  if (!isReviewAction(githubWorkspaceAction(type))) throw new Error("unsupported github review request");
+  return { type, review_id: reviewId };
+}
+
 export function githubSyncRequest(type, syncId) {
   if (!isSyncAction(githubWorkspaceAction(type))) throw new Error("unsupported github sync request");
   return { type, sync_id: syncId };
@@ -35,7 +49,7 @@ export function githubSyncRequest(type, syncId) {
 
 export function githubWorkspaceRequest(type, projectId) {
   const action = githubWorkspaceAction(type);
-  if (!action || isPublishAction(action) || isSyncAction(action)) throw new Error("unsupported github workspace request");
+  if (!action || isPublishAction(action) || isSyncAction(action) || isReviewAction(action)) throw new Error("unsupported github workspace request");
   return { type, project_id: projectId };
 }
 

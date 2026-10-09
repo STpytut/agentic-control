@@ -14,10 +14,10 @@ export const RUNTIME_LABELS: Readonly<Record<string, string>> = {
   claude: "Claude Code",
 };
 
-export type RuntimeRole = "orchestrator" | "executor" | "analyst";
+export type RuntimeRole = "orchestrator" | "executor" | "analyst" | "pr_reviewer";
 
 export const RUNTIME_ROLES: Readonly<Record<string, readonly RuntimeRole[]>> = {
-  codex: ["orchestrator", "executor"],
+  codex: ["orchestrator", "executor", "pr_reviewer"],
   opencode: ["orchestrator", "executor", "analyst"],
   claude: ["orchestrator", "executor", "analyst"],
 };

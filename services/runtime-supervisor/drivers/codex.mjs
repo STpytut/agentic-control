@@ -153,6 +153,23 @@ function execArgv({ model, sessionId = null, prompt, reasoningEffort = null, ver
     ...(sessionId ? [sessionId] : []), prompt];
 }
 
+// A pull request's review (rc.145): Codex's own review mode, `exec review`,
+// against the base branch, in a scratch repository built from the pull
+// request — under the read-only profile every orchestrator turn has, its own
+// subagents off. The prompt, when there is one, is the platform's review
+// instructions.
+const REVIEW_BRANCH = /^[A-Za-z0-9][A-Za-z0-9._\/-]{0,199}$/;
+function reviewArgv({ model, version = null, baseBranch, prompt = null }) {
+  if (!REVIEW_BRANCH.test(String(baseBranch ?? "")) || String(baseBranch).includes("..")) {
+    throw new Error("a review names the branch it compares against");
+  }
+  // The pull request's own AGENTS.md is not read: its author would be telling
+  // the reviewer what to say (0.160 on the host: an AGENTS.md instruction was
+  // followed, and not with `project_doc_max_bytes=0`).
+  return [...configOverridesFor(adapter, version), "features.multi_agent=false", "project_doc_max_bytes=0"].flatMap((value) => ["-c", value])
+    .concat(["exec", "review", "--json", "-m", model, "--base", baseBranch, ...(prompt ? [prompt] : [])]);
+}
+
 function parse(line) {
   if (!line.trim()) return null;
   let raw;
@@ -384,6 +401,9 @@ export const codexDriver = Object.freeze({
     gate: Object.freeze({ transport: "channel", workspace: "gate", capability: "gate.smoke" }),
     // A writing run (Stage 12 X2): a batch, like the other executors.
     task: Object.freeze({ transport: "batch", workspace: "grant", grantMode: "read_write", capability: "run.workspace_write" }),
+    // A pull request's review (rc.145): a batch in a scratch repository built
+    // from the pull request, never the project's workspace.
+    review: Object.freeze({ transport: "batch", workspace: "review", capability: "run.read_only" }),
   }),
 
   sessions: Object.freeze({
@@ -399,9 +419,15 @@ export const codexDriver = Object.freeze({
     // configuration before the subcommand (P-2).
     // A task is `codex exec` (Stage 12 X2); every other surface the app-server.
     argv: ({ version = null, surface = null, model, sessionId = null, prompt, reasoningEffort = null, subagents = false,
-      systemPrompt = null } = {}) => (surface === "task"
+      systemPrompt = null, baseBranch = null } = {}) => (surface === "task"
       ? execArgv({ model, sessionId, prompt, reasoningEffort, version, subagents, systemPrompt })
+      : surface === "review" ? reviewArgv({ model, version, baseBranch, prompt })
       : [...configOverridesFor(adapter, version).flatMap((override) => ["-c", override]), "app-server", "--listen", "stdio://"]),
+    // No read-only launch (`readOnlyWritable`) for a review: under a Landlock
+    // ruleset Codex's own sandbox cannot start — "bwrap: setting up uid map:
+    // Permission denied" (0.160 on the host, rc.145) — so a review is held
+    // read-only by Codex's read-only profile, as an orchestrator's turn is,
+    // and runs in a throwaway copy of the pull request, not the workspace.
     // A task's bridge serves the executor's reports.
     environment: ({ surface = null, toolBridge = [] } = {}) => [...(surface === "task" ? ["INFRA_BRIDGE_TOOLS=reports"] : []), ...toolBridge],
     // The catalog holds Codex's own names for its models.

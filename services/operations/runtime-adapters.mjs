@@ -127,7 +127,8 @@ const ADAPTERS = {
     // workspace itself (ADR-0013).
     // An executor too since Stage 12 X2 (T6): a task is `codex exec` under a
     // workspace profile that denies ~/.codex (0.155.0 and later only).
-    roles: ["orchestrator", "executor"],
+    // rc.145 (0153): Codex reviews a pull request in its own review mode.
+    roles: ["orchestrator", "executor", "pr_reviewer"],
     dispatch: {
       // Both vocabularies until 11.2 N6: a job queued under the old name
       // before the update is still this runtime's after it (migration 0073).

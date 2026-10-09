@@ -122,6 +122,11 @@ export type ChatMessage = {
   runtime?: string;
   // M7 (0151): a question an analyst is still reading, which the owner may stop.
   stopConsultation?: { projectId: string; consultationId: string };
+  // rc.145 (0153): a finished pull request review the owner may post on GitHub.
+  publishReview?: { projectId: string; reviewId: string; prNumber: number };
+  // Written from someone else's words — a pull request's review quotes it —
+  // so its Markdown loads nothing from elsewhere (no images).
+  untrusted?: boolean;
   // A workflow record the operator should not miss (a run that ended without
   // its report, a job that stopped for good) rather than a step of the routine.
   notice?: boolean;
@@ -556,6 +561,40 @@ function interactionMessage(event: EventSummary, sensitive: boolean): ChatMessag
     const action = typeof payload.requested_action === "string" && payload.requested_action.trim() ? `\n\n${payload.requested_action}` : "";
     return { ...base, role: "agent", author: actorName(event, "to", "The executor"), actorRole: "executor", runtime: runtimeOf(event, "to"), content: `Blocked: ${payload.reason}${action}` };
   }
+  // rc.145 (0153): a pull request's review by Codex — asked, read, answered,
+  // posted. Said by the platform and by Codex, never by the orchestrator, and
+  // none of it starts a turn.
+  if (event.eventType.startsWith("pr_review.")) {
+    const pr = `pull request #${Number(payload.pr_number ?? 0)}${typeof payload.title === "string" && payload.title ? ` “${payload.title}”` : ""}`;
+    const model = typeof payload.model === "string" && payload.model ? payload.model : "";
+    const runtime = typeof payload.runtime_type === "string" && payload.runtime_type ? payload.runtime_type : undefined;
+    const reviewer = runtime ? runtimeLabel(runtime) : "The reviewer";
+    if (event.eventType === "pr_review.requested") {
+      return { ...base, role: "system", author: "", content: `Review of pull request #${Number(payload.pr_number ?? 0)} requested${runtime ? ` from ${reviewer}` : ""}${model ? ` (${model})` : ""}.` };
+    }
+    if (event.eventType === "pr_review.started") {
+      const head = typeof payload.head_sha === "string" ? payload.head_sha.slice(0, 12) : "";
+      return { ...base, role: "system", author: "", content: `${reviewer} is reviewing ${pr}${head ? ` at ${head}` : ""}${typeof payload.base_ref === "string" && payload.base_ref ? ` against ${payload.base_ref}` : ""}.` };
+    }
+    if (event.eventType === "pr_review.completed" && typeof payload.review === "string") {
+      const link = typeof payload.pr_url === "string" && /^https:\/\//.test(payload.pr_url) ? `[${pr}](${payload.pr_url})` : pr;
+      return { ...base, role: "agent", author: `${reviewer} review`, actorRole: "reviewer", untrusted: true, ...(runtime ? { runtime } : {}), ...(model ? { model } : {}),
+        content: `Review of ${link}\n\n${payload.review}`,
+        ...(typeof payload.review_id === "string" ? { publishReview: { projectId: "", reviewId: payload.review_id, prNumber: Number(payload.pr_number ?? 0) } } : {}) };
+    }
+    if (event.eventType === "pr_review.publish_requested") {
+      return { ...base, role: "system", author: "", content: `Posting the review of ${pr} on GitHub…` };
+    }
+    if (event.eventType === "pr_review.published") {
+      const url = typeof payload.published_url === "string" && /^https:\/\//.test(payload.published_url) ? payload.published_url : "";
+      return { ...base, role: "system", author: "", content: `The review of ${pr} was posted on GitHub${url ? `: ${url}` : ""}.` };
+    }
+    if (event.eventType === "pr_review.failed" || event.eventType === "pr_review.publish_failed") {
+      const why = String(payload.failure ?? payload.error ?? "no reason given");
+      return { ...base, role: "system", author: "", notice: true,
+        content: event.eventType === "pr_review.failed" ? `The review of ${pr} did not finish: ${why}.` : `The review of ${pr} was not posted on GitHub: ${why}. You can try again.` };
+    }
+  }
   // Stage 12 (0147): the orchestrator's question to an analyst, and the
   // analyst's answer as its own message, with the model that wrote it.
   if (event.eventType === "consultation.requested" && typeof payload.question === "string") {
@@ -587,13 +626,27 @@ export function conversationMessages(events: EventSummary[], task?: TaskSummary,
   // A question still being read keeps its Stop; one answered or failed does not.
   const finished = new Set(events.filter((event) => event.eventType === "consultation.answered" || event.eventType === "consultation.failed")
     .map((event) => String((event.payload as Record<string, unknown>).consultation_id ?? "")));
+  // A review being posted, or posted, has no Publish button: the last of its
+  // publish events says which (a failed post brings the button back).
+  const lastPublish = new Map<string, string>();
+  for (const event of events) {
+    if (["pr_review.publish_requested", "pr_review.published", "pr_review.publish_failed"].includes(event.eventType)) {
+      lastPublish.set(String((event.payload as Record<string, unknown>).review_id ?? ""), event.eventType);
+    }
+  }
+  const posted = new Set([...lastPublish].filter(([, type]) => type !== "pr_review.publish_failed").map(([id]) => id));
   return events.map((event) => {
     if (event.eventType === "run.input_requested") sensitive = (event.payload as Record<string, unknown>).sensitivity === "sensitive";
     const actors = (event.actors ?? {}) as Json;
     if (actors.from_runtime) sides.orchestrator = runtimeLabel(String(actors.from_runtime));
     if (actors.to_runtime) sides.executor = runtimeLabel(String(actors.to_runtime));
     const message = interactionMessage(event, sensitive) ?? messageFromEvent(event, task, { ...sides });
-    if (message.actorRole === "reviewer" && afterConsultation) message.actorRole = "orchestrator";
+    // A pull request's review is its reviewer's, whatever came before it.
+    if (message.actorRole === "reviewer" && afterConsultation && !event.eventType.startsWith("pr_review.")) message.actorRole = "orchestrator";
+    if (message.publishReview) {
+      if (posted.has(message.publishReview.reviewId) || !projectId) delete message.publishReview;
+      else message.publishReview.projectId = projectId;
+    }
     if (message.stopConsultation) {
       if (finished.has(message.stopConsultation.consultationId) || !projectId) delete message.stopConsultation;
       else message.stopConsultation.projectId = projectId;

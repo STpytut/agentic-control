@@ -70,9 +70,46 @@ export function ChatMessage({ message, timeLabel, modelLabel }: { message: ChatM
     <RuntimeMark runtime={message.runtime} fallback={message.author}/>
     <div className="min-w-0">
       <header className="flex min-h-6 flex-wrap items-center gap-x-2"><strong className="type-meta font-medium">{message.author}</strong>{message.actorRole && <RoleChip role={message.actorRole}/>}{detail && <span className="type-meta text-muted">{detail}</span>}<time className="type-meta text-muted">{timeLabel}</time></header>
-      <div className="message-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown></div>
+      <div className="message-markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}
+        {...(message.untrusted ? { disallowedElements: ["img"], unwrapDisallowed: true } : {})}>{message.content}</ReactMarkdown></div>
+      {message.publishReview && <PublishReview {...message.publishReview}/>}
     </div>
   </article>;
+}
+
+// rc.145 (0153): post a finished review on its pull request — only on the
+// owner's click, and said so before it is done. The broker posts it within a
+// minute; the chat then shows the link and the button goes.
+function PublishReview({ projectId, reviewId, prNumber }: { projectId: string; reviewId: string; prNumber: number }) {
+  const [state, setState] = useState<"idle" | "confirm" | "sending" | "sent" | "error">("idle");
+  const [error, setError] = useState("");
+  async function publish() {
+    setState("sending");
+    try {
+      const response = await fetch("/api/control-plane/actions", { method: "POST", headers: controlPlaneActionHeaders(),
+        body: JSON.stringify({ kind: "pr_review_publish", projectId, reviewId }) });
+      const answer = await response.json();
+      if (response.ok && answer.ok) setState("sent");
+      else { setError(String(answer.error ?? "The review was not sent")); setState("error"); }
+    } catch {
+      setError("The review was not sent");
+      setState("error");
+    }
+  }
+  if (state === "sent") return <p className="type-meta mt-2 text-muted">Posting on pull request #{prNumber} — the link appears here within a minute.</p>;
+  if (state === "confirm" || state === "sending") {
+    return <div className="type-meta mt-2 flex flex-wrap items-center gap-2">
+      <span>Post this review as a comment on pull request #{prNumber}? Everyone with access to the repository will see it.</span>
+      <button type="button" className="font-medium text-ink underline-offset-4 hover:underline disabled:opacity-50" disabled={state === "sending"} onClick={publish}>
+        {state === "sending" ? "Posting…" : "Post"}</button>
+      <button type="button" className="text-muted underline-offset-4 hover:underline" disabled={state === "sending"} onClick={() => setState("idle")}>Cancel</button>
+    </div>;
+  }
+  return <div className="type-meta mt-2 flex flex-wrap items-center gap-2">
+    <button type="button" className="inline-flex min-h-8 items-center rounded-md border border-line-strong px-3 font-medium text-ink hover:border-ink"
+      onClick={() => setState("confirm")}>Publish to GitHub</button>
+    {state === "error" && <span className="text-danger">{error}</span>}
+  </div>;
 }
 
 // M7 (0151): stop a question an analyst is still reading. The worker cancels
