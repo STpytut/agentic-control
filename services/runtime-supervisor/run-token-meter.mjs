@@ -21,19 +21,19 @@ import { codexExecTokens } from "./runtime-events.mjs";
 
 const obj = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : null);
 
-// The tokens one raw event adds, by runtime. `seen` is the run's own memory
-// (Claude Code's message ids).
+// The tokens one raw event adds, by runtime, in usage-limits.mjs's shape, or
+// null. `seen` is the run's own memory (Claude Code's message ids).
 const READERS = Object.freeze({
   claude: (raw, seen) => {
-    if (raw?.type !== "assistant") return 0;
+    if (raw?.type !== "assistant") return null;
     const message = obj(raw.message);
     const id = typeof message?.id === "string" ? message.id : null;
-    if (!message?.usage || !id || seen.has(id)) return 0;
+    if (!message?.usage || !id || seen.has(id)) return null;
     seen.add(id);
-    return claudeTokens(message.usage).total;
+    return claudeTokens(message.usage);
   },
-  opencode: (raw) => (raw?.type === "step_finish" ? openCodeTokens(raw.part?.tokens)?.total ?? 0 : 0),
-  codex: (raw) => (raw?.type === "turn.completed" ? codexExecTokens(raw.usage)?.total ?? 0 : 0),
+  opencode: (raw) => (raw?.type === "step_finish" ? openCodeTokens(raw.part?.tokens) : null),
+  codex: (raw) => (raw?.type === "turn.completed" ? codexExecTokens(raw.usage) : null),
 });
 
 export const RUN_TOKEN_LIMIT_MIN = 10_000;
@@ -46,18 +46,29 @@ export function runTokenLimit(value) {
 }
 
 export function createTokenMeter(runtime, limit) {
-  const read = READERS[runtime] ?? (() => 0);
+  const read = READERS[runtime] ?? (() => null);
   const cap = runTokenLimit(limit);
   const seen = new Set();
   let total = 0;
   let exceeded = false;
+  // What was counted, by part: a run stopped here never reaches the event its
+  // usage is recorded from (Claude Code's result), so this is what it used
+  // (rc.146's live test: three stopped runs recorded 0).
+  const parts = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 }, total: 0 };
   return {
     get limit() { return cap; },
     get total() { return total; },
     get exceeded() { return exceeded; },
+    get tokens() { return { ...parts, cache: { ...parts.cache } }; },
     // True the first time the run goes past its limit, and only then.
     add(raw) {
-      total += read(raw, seen);
+      const counted = read(raw, seen);
+      if (counted) {
+        for (const key of ["input", "output", "reasoning", "total"]) parts[key] += counted[key] ?? 0;
+        parts.cache.read += counted.cache?.read ?? 0;
+        parts.cache.write += counted.cache?.write ?? 0;
+        total += counted.total ?? 0;
+      }
       if (cap === null || exceeded || total <= cap) return false;
       exceeded = true;
       return true;
