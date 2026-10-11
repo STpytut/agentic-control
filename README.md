@@ -17,9 +17,9 @@ laptop or a phone.
 > On the server the product is still called **`infra-cod`**: that is the CLI
 > (`sudo infra-cod doctor`), the services and the paths.
 
-[![A 30-second film: the owner writes a task, the orchestrator plans it, another agent writes the code, the reviewer sends it back, the fix passes, and the owner approves the pull request](docs/images/demo.gif)](https://agentic-control.pages.dev/video/agentic-control.mp4)
+[![A 30-second film: the owner writes a task, the orchestrator plans it, another agent writes the code, the reviewer sends it back, the fix passes, and the owner approves the pull request](docs/images/demo.gif)](https://agenticcontrol.app/video/agentic-control.mp4)
 
-<sub>A 30-second film redrawn from the panel. [Watch it with sound](https://agentic-control.pages.dev/video/agentic-control.mp4).</sub>
+<sub>A 30-second film redrawn from the panel. [Watch it with sound](https://agenticcontrol.app/video/agentic-control.mp4).</sub>
 
 ![A review in the panel: the reviewing agent's findings and the executor's evidence](docs/images/panel-review.jpg)
 
@@ -186,7 +186,7 @@ defaults still change between release candidates. Use it at your own risk.
 Tell us where installing it stopped you. The developer guide, where some
 design documents are still in Russian, is [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
-Website: <https://agentic-control.pages.dev>.
+Website: <https://agenticcontrol.app>. Contact: <hello@agenticcontrol.app>.
 
 ## License
 
