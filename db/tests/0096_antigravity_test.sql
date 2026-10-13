@@ -134,8 +134,8 @@ BEGIN
     RAISE EXCEPTION 'the catalog row did not take the connection''s gateway';
   END IF;
   v_reason:=pg_temp.reason_of(format(
-    'INSERT INTO provider_model_catalog(operator_id,connection_id,runtime_type,provider_id,model_id,display_name,discovery_source,status) VALUES(%L,%L,''antigravity'',''google'',''other'',''Other'',''claude_aliases'',''discovered'')', v_owner, v_connection));
-  IF v_reason IS NULL THEN RAISE EXCEPTION 'nothing refused a model under another runtime''s source'; END IF;
+    'INSERT INTO provider_model_catalog(operator_id,connection_id,runtime_type,provider_id,model_id,display_name,discovery_source,status) VALUES(%L,%L,''antigravity'',''google'',''other'',''Other'',''nowhere'',''discovered'')', v_owner, v_connection));
+  IF v_reason IS NULL THEN RAISE EXCEPTION 'nothing refused a model under an unknown source'; END IF;
 
   RAISE NOTICE 'Antigravity is connected when the host says it is signed in, with its gateway and shape, and its models have their own source';
 END $$;
