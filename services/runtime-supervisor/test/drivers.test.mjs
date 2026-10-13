@@ -148,6 +148,18 @@ const NATIVE_SAMPLES = {
       usage: { input_tokens: 10, output_tokens: 3, cache_read_input_tokens: 100, cache_creation_input_tokens: 5 }, total_cost_usd: 0.01 },
     { type: "system", subtype: "status", session_id: "s-1" },
   ],
+  // Antigravity's shapes, as the spike recorded them on the host at 1.3.4
+  // (rc.150): a checkpoint step is kept raw.
+  "antigravity adapter 1.0.0 / runtime 1.3.4": [
+    { event: "init", conversation_id: "c-1", init: { cwd: "/w", tools: ["read_file"], permission_mode: "default", model: "gemini-3.8-flash-high" } },
+    { event: "step_update", step_update: { conversation_id: "c-1", step_index: 1, state: "ACTIVE", step_type: "tool", tool_name: "read_file" } },
+    { event: "step_update", step_update: { conversation_id: "c-1", step_index: 1, state: "DONE", step_type: "tool", tool_name: "read_file",
+      tool_info: { name: "read_file", parameters: { path: "NOTE.md" }, output: "ok" } } },
+    { event: "step_update", step_update: { conversation_id: "c-1", step_index: 2, state: "DONE", step_type: "agent_response", text_delta: "DONE" } },
+    { event: "step_update", step_update: { conversation_id: "c-1", step_index: 3, state: "DONE", step_type: "checkpoint" } },
+    { event: "result", result: { conversation_id: "c-1", status: "SUCCESS", response: "DONE", duration_seconds: 2.5, num_turns: 1,
+      usage: { input_tokens: 10, output_tokens: 3, thinking_tokens: 1, cache_read_tokens: 2, total_tokens: 16 } } },
+  ],
 };
 
 test("each driver is bound to the exact adapter/runtime pair it was shown at", () => {
@@ -177,7 +189,7 @@ test("every native event is kept beside its normalised form, including the ones 
     assert.ok(normalised.length >= 3, `${driver.name} normalised ${normalised.length}`);
     for (const { raw, event } of normalised) {
       assert.match(event.eventType, /^runtime\.[a-z0-9_.-]+$/);
-      assert.equal(event.details.native_type, raw.method ?? raw.type, "the native type travels with the event");
+      assert.equal(event.details.native_type, raw.method ?? raw.type ?? raw.event, "the native type travels with the event");
     }
     assert.ok(parsed.some((entry) => entry.event === null), `${driver.name}: an unnormalised sample is kept raw`);
     assert.equal(driver.stream.parse("not json"), null);
@@ -643,7 +655,7 @@ test("Codex's writing run reads its exec events: the session, the answer, the fa
 
 // Stage 12 (0147): an analyst's run reads a snapshot and calls nothing.
 test("an analyst's consult surface is a read-only snapshot run with no tool of the platform's", () => {
-  for (const name of ["claude", "opencode"]) {
+  for (const name of ["claude", "opencode", "antigravity"]) {
     assert.deepEqual(surfaceOf(driverFor(name), "consult"), { transport: "batch", workspace: "snapshot", capability: "run.read_only" });
     assert.ok(adapterFor(name).roles.includes("analyst"));
     assert.ok(adapterFor(name).dispatch.jobTypes.includes("consultation_run"));

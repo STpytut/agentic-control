@@ -68,6 +68,11 @@ ReadWritePaths=/home/opencode-worker/.config/opencode
 # stdout, so what the operator saw was "OpenCode exited with code 1: " with
 # nothing after the colon.
 ReadWritePaths=/home/opencode-worker/.cache
+# Antigravity's state (rc.150): the Google sign-in and conversations, the CLI's
+# configuration, and a cache — the three it writes under the read-only launch.
+ReadWritePaths=/home/antigravity-worker/.gemini
+ReadWritePaths=/home/antigravity-worker/.config/antigravity
+ReadWritePaths=/home/antigravity-worker/.cache
 # Project-scoped deploy keys are removed by deprovision_project; the path is
 # strictly bounded to the configured key root (never /etc broadly).
 ReadWritePaths=/etc/infra-cod/github-deploy-keys

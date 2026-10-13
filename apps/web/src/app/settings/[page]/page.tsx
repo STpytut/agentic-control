@@ -6,6 +6,7 @@ import { SettingsMenu, SettingsPageHeader } from "@/components/settings-menu";
 import { BackToChats } from "@/components/last-chat";
 import { GitHubConnectionCard } from "@/components/github-connection-card";
 import { ClaudeConnectionCard } from "@/components/claude-connection-card";
+import { AntigravityConnectionCard } from "@/components/antigravity-connection-card";
 import { TelegramCard } from "@/components/telegram-card";
 import { getTelegramConnection } from "@/lib/telegram-connection";
 import { OffsiteBackupCard } from "@/components/offsite-backup-card";
@@ -18,6 +19,7 @@ import { RuntimeReadinessCard } from "@/components/runtime-readiness-card";
 import { UsageLimitsCard } from "@/components/usage-limits-card";
 import { statusTone } from "@/components/ui/status-tone";
 import { getOperatorClaudeState } from "@/lib/claude-connections";
+import { getOperatorAntigravityState } from "@/lib/antigravity-connections";
 import { getOperatorCodexState } from "@/lib/codex-connections";
 import { getGitHubAppConfig, getGitHubAppManifestStatus, getOperatorGitHubConnections } from "@/lib/github-connections";
 import { getOperatorOpenCodeState } from "@/lib/opencode-connections";
@@ -61,11 +63,12 @@ export default async function SettingsPage({ params, searchParams }: { params: P
   const current = page as PageId;
   const operator = await requireOperator();
   // The connections are read on every page: the menu says when one needs action.
-  const [connections, codex, opencode, claude] = await Promise.all([
+  const [connections, codex, opencode, claude, antigravity] = await Promise.all([
     getOperatorGitHubConnections(operator.userId),
     getOperatorCodexState(operator.userId),
     getOperatorOpenCodeState(operator.userId),
     getOperatorClaudeState(operator.userId),
+    getOperatorAntigravityState(operator.userId),
   ]);
   const runtimeUpdateRequests = current === "runtimes" ? await getRuntimeUpdateRequests() : [];
   const telegram = current === "notifications" ? await getTelegramConnection(operator.userId) : null;
@@ -76,6 +79,7 @@ export default async function SettingsPage({ params, searchParams }: { params: P
   const needAction = [
     ...connections.map((connection) => connection.status),
     codex.connection?.status, opencode.free?.status, opencode.go?.status, opencode.openrouter?.status, claude.connection?.status,
+    antigravity.connection?.status,
   ].filter((status): status is string => Boolean(status) && NEEDS_ACTION.has(String(status))).length;
 
   const [sessionList, csrfToken, models, runtimeReadiness, runtimeVersions, runtimeQualifications, runtimeActivations, usageLimits, projects, sidebar, tombstones, archived] = await Promise.all([
@@ -124,6 +128,7 @@ export default async function SettingsPage({ params, searchParams }: { params: P
           <CodexConnectionCard initialConnection={codex.connection} initialLogin={codex.login} operatorDisplayName={operator.displayName}/>
           <OpenCodeConnectionCard initialFree={opencode.free} initialGo={opencode.go} initialOpenRouter={opencode.openrouter} initialEnrollment={opencode.enrollment} operatorDisplayName={operator.displayName}/>
           <ClaudeConnectionCard initial={claude}/>
+          <AntigravityConnectionCard initial={antigravity}/>
         </div>
       </>}
 

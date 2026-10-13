@@ -1006,3 +1006,29 @@ test("per-run memory limits are reported from the supervisor's cgroup", async ()
   assert.equal(state(runMemoryLimitsCheck({ run: unit, read: files({ [`${root}/cgroup.subtree_control`]: "memory\n", [`${root}/supervisor/cgroup.procs`]: "" }) })), "warning");
   assert.equal(state(runMemoryLimitsCheck({ run: () => ({ ok: false, stdout: "" }) })), "warning");
 });
+
+// rc.150: a runtime whose self-update is stopped by its directory is checked
+// for that directory, and the helper binaries it fetches are reported.
+test("Antigravity's executable directory is the control doctor checks, and its helper binaries are named", async () => {
+  const { checkAgentRuntimes } = await import(DOCTOR_URL);
+  const find = (checks, name) => checks.find((check) => check.name === name);
+  const directory = "/opt/infra-cod/runtimes/antigravity/1.3.4";
+  const runtimes = { antigravity: { active: { version: "1.3.4", directory },
+    installed: [{ version: "1.3.4", directory, executableSha256: "abc" }],
+    verification: { autoUpdate: { verified: true, setting: "a root-owned executable directory the runtime user cannot write" } } } };
+  const probe = () => ({ ok: true, stdout: "agy 1.3.4", stderr: "", code: 0 });
+  const stat = (mode) => () => ({ isDirectory: () => true, mode: 0o40000 | mode, uid: 0 });
+
+  const held = await checkAgentRuntimes({ runtimes, probe, hashExecutable: () => "abc", stat: stat(0o755), exists: () => false, list: () => [] });
+  assert.equal(find(held, "runtime.executable_directory.antigravity").severity, "info");
+  assert.match(find(held, "runtime.executable_directory.antigravity").message, /not writable by antigravity-worker/);
+  assert.equal(find(held, "runtime.helper_binaries.antigravity").severity, "info");
+  assert.equal(find(held, "runtime.executable_directory.codex"), undefined, "only a directory-controlled runtime has the check");
+
+  const loose = await checkAgentRuntimes({ runtimes, probe, hashExecutable: () => "abc", stat: stat(0o775),
+    exists: (file) => file === "/home/antigravity-worker/.gemini/antigravity-cli/bin", list: () => ["agentapi", "webm_encoder"] });
+  assert.equal(find(loose, "runtime.executable_directory.antigravity").severity, "critical");
+  assert.match(find(loose, "runtime.executable_directory.antigravity").message, /no longer held back by its directory/);
+  assert.equal(find(loose, "runtime.helper_binaries.antigravity").severity, "warning");
+  assert.match(find(loose, "runtime.helper_binaries.antigravity").message, /agentapi, webm_encoder/);
+});

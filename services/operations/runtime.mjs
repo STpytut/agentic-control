@@ -192,7 +192,46 @@ function pinnedKey() {
   return readFileSync(file, "utf8");
 }
 
+// A runtime Google serves from its own manifest, not from the npm registry
+// (Antigravity, rc.150). The manifest is `{version, url, sha512}` for the
+// newest build only and nobody signs it, so a version this release pins is
+// resolved from the pinned record and the manifest is not asked; a version it
+// does not pin is taken from the manifest only when the manifest names exactly
+// that version, and the record says the digest came from an unsigned manifest.
+export function isVendorManifestSource(adapter) {
+  return adapter?.source?.kind === "vendor-manifest";
+}
+
+const HEX_SHA512 = /^[0-9a-f]{128}$/;
+
+function integrityOfHex(sha512, what) {
+  if (!HEX_SHA512.test(String(sha512 ?? ""))) throw new RuntimeError(`${what} carries no sha512 this installation can check`);
+  return `sha512-${Buffer.from(sha512, "hex").toString("base64")}`;
+}
+
+async function resolveFromVendorManifest(adapter, version, { fetchJson }) {
+  const name = adapter.source.name;
+  const pinned = adapter.pinnedReleases?.[version] ?? null;
+  if (pinned) {
+    if (!/^https:\/\/\S+$/.test(String(pinned.url ?? ""))) throw new RuntimeError(`${name} ${version} is pinned without an https URL`);
+    return { name, version, tarball: pinned.url, integrity: integrityOfHex(pinned.sha512, `${name} ${version}'s pinned record`),
+      signatures: [], source: "release-pinned" };
+  }
+  const manifest = await fetchJson(adapter.source.manifest, { maxBytes: 1024 * 1024 });
+  const offered = String(manifest?.version ?? "");
+  if (offered !== version) {
+    throw new RuntimeError(
+      `${name} ${version} is not pinned by this release, and the vendor's manifest offers ${offered || "no version"}; `
+      + "only the version the manifest names can be installed without a pin",
+    );
+  }
+  if (!/^https:\/\/\S+$/.test(String(manifest.url ?? ""))) throw new RuntimeError(`the vendor's manifest for ${name} ${version} names no https tarball`);
+  return { name, version, tarball: manifest.url, integrity: integrityOfHex(manifest.sha512, `the vendor's manifest for ${name} ${version}`),
+    signatures: [], source: "vendor-manifest" };
+}
+
 export async function resolvePackage(adapter, version, { fetchJson = defaultFetchJson } = {}) {
+  if (isVendorManifestSource(adapter)) return resolveFromVendorManifest(adapter, version, { fetchJson });
   const coordinates = adapter.packageFor(version);
   const url = `${registryBase()}/${encodeURIComponent(coordinates.name)}/${coordinates.version}`;
   const metadata = await fetchJson(url);
@@ -273,10 +312,20 @@ export function isOffered(entry, now = Date.now()) {
 
 // One runtime's answer. A registry that cannot be read is an answer too — the
 // error is recorded, and yesterday's versions are not presented as today's.
-export async function watchRuntime(name, { fetchJson = defaultFetchJson, activeVersion = null } = {}) {
+export async function watchRuntime(name, { fetchJson = defaultFetchJson, activeVersion = null, now = Date.now } = {}) {
   const adapter = adapterFor(name);
   const packageName = adapter.packageFor("0.0.0").name;
   try {
+    // A vendor manifest names one version, the newest, and no date: it is
+    // dated by the watch that first saw it. Offered on that date like any
+    // other, since the minimum age is the owner's and defaults to none.
+    if (isVendorManifestSource(adapter)) {
+      const manifest = await fetchJson(adapter.source.manifest, { maxBytes: 1024 * 1024 });
+      const version = /^(\d+\.\d+\.\d+)$/.exec(String(manifest?.version ?? ""))?.[1];
+      if (!version) throw new RuntimeError(`the vendor's manifest for ${packageName} names no exact version (${JSON.stringify(manifest?.version)})`);
+      const found = [{ version, published_at: new Date(now()).toISOString(), deprecated: false }];
+      return { runtime: name, activeVersion, versions: newerVersions(found, activeVersion), error: "" };
+    }
     const packument = await fetchJson(`${registryBase()}/${encodeURIComponent(packageName)}`, { maxBytes: WATCH_METADATA_MAX_BYTES });
     if (packument?.name !== packageName) {
       throw new RuntimeError(`asked the registry for ${packageName} and it answered with ${JSON.stringify(packument?.name)}`);
@@ -290,7 +339,17 @@ export async function watchRuntime(name, { fetchJson = defaultFetchJson, activeV
 // The registry signs `name@version:integrity` with a key whose id is pinned
 // here. Both halves matter: a signature that verifies under an unexpected key is
 // a signature from somebody else.
-export function verifyRegistrySignature(resolved, { key = pinnedKey(), keyId = REGISTRY_KEY_ID } = {}) {
+export function verifyRegistrySignature(resolved, { key = null, keyId = REGISTRY_KEY_ID } = {}) {
+  // A vendor-manifest runtime carries no registry signature: what vouches for
+  // the tarball is the sha512 this release pinned (checked by verifyIntegrity
+  // against the bytes downloaded), or the vendor's unsigned manifest, and the
+  // record names which. The pinned key is not read for it.
+  if (resolved.source === "release-pinned" || resolved.source === "vendor-manifest") {
+    const digest = String(resolved.integrity).slice("sha512-".length, "sha512-".length + 16);
+    const by = resolved.source === "release-pinned" ? "release-pinned-sha512" : "vendor-manifest-sha512-unsigned";
+    return { keyId: `${by}:${digest}`, message: `${resolved.name}@${resolved.version}:${resolved.integrity}` };
+  }
+  key ??= pinnedKey();
   const signature = resolved.signatures.find((candidate) => candidate.keyid === keyId);
   if (!signature) {
     const seen = resolved.signatures.map((candidate) => candidate.keyid).join(", ") || "none";
@@ -520,15 +579,18 @@ export function assertSafeArchiveEntries(verboseListing, names, { topLevel = "pa
   return links.length;
 }
 
-function unpack(tarball, destination, { tar = "tar" } = {}) {
+// `topLevel` is the one member every entry sits under — `package/` for an npm
+// tarball; a vendor tarball may name its single file instead (Antigravity's
+// holds `antigravity` alone).
+function unpack(tarball, destination, { tar = "tar", topLevel = "package" } = {}) {
   const listing = run(tar, ["-tzf", tarball]);
   if (!listing.ok) throw new RuntimeError(`${tarball} is not a readable gzip-compressed tar archive`);
   const names = listing.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
-  const count = assertSafeArchiveMembers(listing.stdout);
+  const count = assertSafeArchiveMembers(listing.stdout, { topLevel });
 
   const verbose = run(tar, ["-tvzf", tarball]);
   if (!verbose.ok) throw new RuntimeError(`${tarball} could not be listed in detail`);
-  assertSafeArchiveEntries(verbose.stdout, names);
+  assertSafeArchiveEntries(verbose.stdout, names, { topLevel });
 
   mkdirSync(destination, { recursive: true });
   const extracted = run(tar, ["--no-same-owner", "--no-same-permissions", "-xzf", tarball, "-C", destination]);
@@ -681,8 +743,9 @@ export async function installRuntime({
     const digests = verifyIntegrity(downloaded, resolved.integrity);
     reporter.step(`integrity matches the signed sha512 (${downloaded.bytes} bytes)`);
 
-    const members = unpack(tarball, path.join(staging, "tree"));
-    reporter.step(`unpacked ${members} members, none of them outside package/`);
+    const topLevel = adapter.archiveTopLevel ?? "package";
+    const members = unpack(tarball, path.join(staging, "tree"), { topLevel });
+    reporter.step(`unpacked ${members} members, none of them outside ${topLevel}/`);
 
     // The executable is checked properly once the tree is in its landing place —
     // `existsSync` here would follow a link, which is the thing being guarded
@@ -797,7 +860,7 @@ export async function installRuntime({
     // runtime itself, or restored from a backup taken before the control
     // existed. Re-activating a tree on the strength of that record would carry
     // the old answer forward over a host that has since changed its mind.
-    const autoUpdate = requireAutoUpdatePolicy(adapter, { acceptUnmanaged, reporter, onRefuse: discard });
+    const autoUpdate = requireAutoUpdatePolicy(adapter, { acceptUnmanaged, reporter, onRefuse: discard, directory });
 
     // A candidate (Stage 12 W3): the same resolve, signature, integrity, unpack,
     // digest and smoke test as an install, and then nothing more. No idle wait,
@@ -807,7 +870,7 @@ export async function installRuntime({
       const installation = {
         version, directory, candidate: true,
         digest: { sha256: digests.sha256, integrity: resolved.integrity },
-        source: { registry: registryBase(), package: `${resolved.name}@${resolved.version}`, tarball: resolved.tarball },
+        source: { registry: isVendorManifestSource(adapter) ? adapter.source.manifest : registryBase(), package: `${resolved.name}@${resolved.version}`, tarball: resolved.tarball },
         installedAt: new Date().toISOString(), actor, executableSha256,
         verification: { smoke: smoke.reported, verifiedAt: new Date().toISOString(), signedBy: signature.keyId, autoUpdate },
       };
@@ -821,7 +884,7 @@ export async function installRuntime({
 
     await activateStaged({
       name, adapter, version, directory, staged, previousActive, actor, reporter, waitSeconds, discard, executableSha256,
-      source: { registry: registryBase(), package: `${resolved.name}@${resolved.version}`, tarball: resolved.tarball },
+      source: { registry: isVendorManifestSource(adapter) ? adapter.source.manifest : registryBase(), package: `${resolved.name}@${resolved.version}`, tarball: resolved.tarball },
       digest: { sha256: digests.sha256, integrity: resolved.integrity },
       verification: { smoke: smoke.reported, verifiedAt: new Date().toISOString(), signedBy: signature.keyId, autoUpdate },
     });
@@ -1120,7 +1183,7 @@ export async function promoteRuntime({
     throw new RuntimeError(`${name} ${version} did not pass its smoke test as ${adapter.user}: ${smoke.detail}. ${name} ${entry.active.version} is still active.`);
   }
   reporter.step(`smoke test passed as ${adapter.user}: ${smoke.reported}`);
-  const autoUpdate = requireAutoUpdatePolicy(adapter, { reporter });
+  const autoUpdate = requireAutoUpdatePolicy(adapter, { reporter, directory: installation.directory });
   const archive = backup(adapter, { name, from: entry.active.version, reporter });
 
   await activateStaged({
@@ -1155,7 +1218,7 @@ export async function rollbackRuntime({ name, actor, reporter, waitSeconds = 0, 
   if (!smoke.ok) {
     throw new RuntimeError(`${name} ${installation.version} did not pass its smoke test as ${adapter.user}: ${smoke.detail}. ${name} ${entry.active.version} is still active.`);
   }
-  const autoUpdate = requireAutoUpdatePolicy(adapter, { reporter });
+  const autoUpdate = requireAutoUpdatePolicy(adapter, { reporter, directory: installation.directory });
   await activateStaged({
     name, adapter, version: installation.version, directory: installation.directory, staged, previousActive: entry.active, actor, reporter, waitSeconds,
     discard: () => {},
@@ -1207,8 +1270,8 @@ export async function applyProbationVerdicts(verdicts, { apply, stdout, stderr, 
 // runtime free to change its own version, with a green exit code and a line of
 // text nobody reads twice. An operator who wants that anyway has to say so, in
 // writing, and it is recorded where the next person will see it.
-export function requireAutoUpdatePolicy(adapter, { acceptUnmanaged = false, reporter, onRefuse = () => {} }) {
-  const result = applyAutoUpdatePolicy(adapter);
+export function requireAutoUpdatePolicy(adapter, { acceptUnmanaged = false, reporter, onRefuse = () => {}, directory = null }) {
+  const result = applyAutoUpdatePolicy(adapter, { directory });
   if (result.verified) {
     reporter.step(`self-update disabled through ${result.setting}`);
     return result;
@@ -1235,10 +1298,17 @@ export function requireAutoUpdatePolicy(adapter, { acceptUnmanaged = false, repo
 // than written by root and handed over: a root-owned config in a runtime home is
 // a file the runtime cannot rewrite and a permission problem waiting for its
 // first real session.
-export function applyAutoUpdatePolicy(adapter, { runAs = runtimeProbeShell } = {}) {
+export function applyAutoUpdatePolicy(adapter, { runAs = runtimeProbeShell, directory = null, stat = lstatSync } = {}) {
   const policy = adapter.autoUpdate;
   if (!policy?.mechanism) {
     return { disabled: false, verified: false, reason: policy?.reason ?? "no mechanism is declared for this runtime" };
+  }
+  // The directory is the control (Antigravity, rc.150): the runtime skips its
+  // own update when it cannot write where its binary sits. Verified on the
+  // tree being installed — root's, 0755 — and on nothing else: a mode the
+  // runtime user could write would be the one install that may update.
+  if (policy.mechanism === "directory") {
+    return directoryUpdateControl(adapter, directory, { stat });
   }
   // Nothing to write: the switches travel with every launch and every probe
   // (runtimeEnvironment below, and the driver's run environment), and the
@@ -1263,6 +1333,30 @@ export function applyAutoUpdatePolicy(adapter, { runAs = runtimeProbeShell } = {
     return { disabled: false, verified: false, reason: written.reason };
   }
   return { disabled: true, verified: true, mechanism: policy.mechanism, setting: policy.setting, source: policy.verifiedAgainst };
+}
+
+// Whether the tree holding a runtime's executable is one its user cannot write:
+// root's (or the harness user's, in a sandbox), and neither group- nor
+// world-writable. Pure in `stat`, so doctor and a test can hand it a directory.
+export function directoryUpdateControl(adapter, directory, { stat = lstatSync, uid = HARNESS ? null : 0 } = {}) {
+  const policy = adapter.autoUpdate;
+  if (!directory) {
+    const entry = readRuntimes().runtimes?.[adapter.name] ?? null;
+    directory = entry?.active?.directory ?? null;
+    if (!directory) return { disabled: false, verified: false, reason: `${adapter.name} has no installed tree to check` };
+  }
+  let info;
+  try {
+    info = stat(directory);
+  } catch (error) {
+    return { disabled: false, verified: false, reason: `${directory} could not be read: ${error.message}` };
+  }
+  if (!info.isDirectory()) return { disabled: false, verified: false, reason: `${directory} is not a directory` };
+  if (uid !== null && info.uid !== uid) return { disabled: false, verified: false, reason: `${directory} is owned by uid ${info.uid}, not root` };
+  if (info.mode & 0o022) {
+    return { disabled: false, verified: false, reason: `${directory} is writable by its group or others (mode ${(info.mode & 0o777).toString(8)})` };
+  }
+  return { disabled: true, verified: true, mechanism: policy.mechanism, setting: policy.setting, source: policy.verifiedAgainst, directory };
 }
 
 // Writes a setting into the *root* table of a TOML file, and nowhere else.

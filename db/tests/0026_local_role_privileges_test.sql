@@ -618,6 +618,13 @@ INSERT INTO infra_web_allowlist(signature) VALUES
   ('start_claude_login(p_owner_id uuid)'),
   ('get_claude_login(p_owner_id uuid)'),
   ('submit_claude_login_code(p_owner_id uuid, p_session_id uuid, p_code text)'),
+  -- rc.150 (0157): the same sign-in for any runtime whose driver signs in by a
+  -- pasted code (Antigravity), and Antigravity's connection card.
+  ('start_runtime_login(p_owner_id uuid, p_runtime_type text)'),
+  ('get_runtime_login(p_owner_id uuid, p_runtime_type text)'),
+  ('get_operator_antigravity_connection(p_operator_id uuid)'),
+  ('connect_antigravity_connection(p_operator_id uuid, p_actor text, p_correlation_id text)'),
+  ('disconnect_antigravity_connection(p_operator_id uuid, p_connection_id uuid, p_actor text, p_correlation_id text)'),
   ('get_operator_model_catalog(p_operator_id uuid)'),
   ('get_operator_opencode_connections(p_operator_id uuid)'),
   ('get_operator_opencode_enrollment_status(p_operator_id uuid)'),

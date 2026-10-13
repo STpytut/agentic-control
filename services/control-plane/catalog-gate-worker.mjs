@@ -140,7 +140,7 @@ export function batchOutcome(driver, run) {
   const stderrLine = run?.exit_code === 0 ? "" : String(run?.stderr ?? "").trim().split("\n").at(-1) ?? "";
   // The stream's reason first; stderr only when it says something the stream
   // did not — a CLI repeats its API error on both, and the panel showed it twice.
-  const streamed = driver.stream?.failure?.(stdout) ?? "";
+  const streamed = driver.stream?.failure?.(stdout, String(run?.stderr ?? "")) ?? "";
   const failure = streamed && (!stderrLine || /too old for this model/.test(streamed)) ? streamed
     : [streamed, stderrLine].filter(Boolean).join(" — ");
   return {
@@ -191,7 +191,7 @@ export function resolvedClaudeModel(stdout) {
   return resolvedModelOf(driverFor("claude"), stdout);
 }
 
-const TURNS = Object.freeze({ codex: codexTurn, opencode: batchTurn, claude: batchTurn });
+const TURNS = Object.freeze({ codex: codexTurn, opencode: batchTurn, claude: batchTurn, antigravity: batchTurn });
 
 // The subscription's windows, read at most every five minutes: every automatic
 // Codex check of a reconnect would otherwise open the account channel again.

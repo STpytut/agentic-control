@@ -9,7 +9,8 @@
 import { isMain } from "./entrypoint.mjs";
 import readline from "node:readline";
 import { queryJson, closePool, listen } from "./db.mjs";
-import { processClaudeLogin } from "./claude-login.mjs";
+import { processRuntimeLogin } from "./claude-login.mjs";
+import { driverFor } from "../runtime-supervisor/drivers/index.mjs";
 import { createWake } from "./poll-wait.mjs";
 import { RuntimeSupervisorClient, cancelThrough, retryWhileRuntimeBusy } from "../runtime-supervisor/client.mjs";
 import { redactError, runPollLoop, shutdownSignal } from "./worker-loop.mjs";
@@ -439,22 +440,23 @@ export async function runOnce() {
   return results;
 }
 
-// Claude Code's sign-in from the panel (0136) shares this broker: it is the
-// other runtime account the panel signs in. A sign-in waits up to fifteen
+// The paste-code sign-ins from the panel (0136: Claude Code; rc.150:
+// Antigravity, the session naming its runtime) share this broker: they are the
+// other runtime accounts the panel signs in. A sign-in waits up to fifteen
 // minutes for the owner to paste a code, so it runs beside the poll rather than
 // inside it, where it would hold back a Codex login for that long.
 const claudeLogins = new Map();
 // Set by main; a sign-in waiting for its code stops with the service.
 let stopping = null;
 
-async function openClaudeAccount() {
+async function openRuntimeAccount(runtime) {
   const supervisor = new RuntimeSupervisorClient();
   await supervisor.connect();
   try {
     const handle = await retryWhileRuntimeBusy(
-      () => supervisor.open({ runtime: "claude", surface: "account" }),
+      () => supervisor.open({ runtime, surface: "account" }),
       { onWait: ({ attempt, remainingMs }) => process.stderr.write(`${JSON.stringify({
-        type: "claude-login.waiting-for-runtime", attempt, remaining_ms: remainingMs,
+        type: "claude-login.waiting-for-runtime", runtime, attempt, remaining_ms: remainingMs,
       })}\n`) },
     );
     handle.once("close", () => supervisor.close());
@@ -477,8 +479,12 @@ export async function startClaudeLogins() {
   const claimed = await queryJson(`SELECT claim_claude_logins(:'worker_id',1)::text;`, { worker_id: workerId });
   const started = [];
   for (const session of Array.isArray(claimed) ? claimed : []) {
-    const running = processClaudeLogin(session, { open: openClaudeAccount, record: recordClaudeLogin, workerId, signal: stopping })
-      .then((result) => process.stdout.write(`${JSON.stringify({ type: "claude-login", session_id: session.id, ...result })}\n`))
+    // The runtime the session names (0157), whose driver says how its sign-in
+    // reads; a session from before the column is Claude Code's.
+    const runtime = typeof session.runtime_type === "string" && session.runtime_type ? session.runtime_type : "claude";
+    const login = driverFor(runtime).input.login;
+    const running = processRuntimeLogin(session, { open: () => openRuntimeAccount(runtime), record: recordClaudeLogin, workerId, signal: stopping, login })
+      .then((result) => process.stdout.write(`${JSON.stringify({ type: "claude-login", runtime, session_id: session.id, ...result })}\n`))
       .catch((error) => process.stderr.write(`${JSON.stringify({ type: "claude-login.failed", session_id: session.id, error: safeError(error) })}\n`))
       .finally(() => claudeLogins.delete(session.id));
     claudeLogins.set(session.id, running);

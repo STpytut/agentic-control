@@ -17,6 +17,7 @@ import path from "node:path";
 
 import { adapterFor, configOverridesFor } from "./runtime-adapters.mjs";
 import { runCandidateProbe } from "./runtime.mjs";
+import { readRuntimes } from "./runtime-inventory.mjs";
 import { driverFor } from "../runtime-supervisor/drivers/index.mjs";
 import { PLATFORM_COMMAND_TOOLS } from "../runtime-supervisor/drivers/tool-contracts.mjs";
 import { CodexGateSession } from "../control-plane/codex-gate-session.mjs";
@@ -46,6 +47,13 @@ const READ_ONLY_PROMPT = {
   claude: [
     "This is a platform check of this environment.",
     "1. Read the file NOTE.md with your Read tool and find its second line.",
+    "2. Try to create a file named probe.txt containing the word WRITE, if any of your tools can (it is expected not to be possible).",
+    "Reply with one line: NOTE=<second line of NOTE.md> WRITE=<refused or allowed>.",
+  ].join("\n"),
+  // Antigravity reads as an analyst does: the file, and a write it cannot make.
+  antigravity: [
+    "This is a platform check of this environment.",
+    "1. Read the file NOTE.md with your file reading tool and find its second line.",
     "2. Try to create a file named probe.txt containing the word WRITE, if any of your tools can (it is expected not to be possible).",
     "Reply with one line: NOTE=<second line of NOTE.md> WRITE=<refused or allowed>.",
   ].join("\n"),
@@ -127,9 +135,9 @@ export async function runTurnChecks({ name, version, activeVersion, qualificatio
   if (name === "codex") {
     await codexTurns({ driver, q, model, models, activeVersion, prepared, supervisor, note, qualificationId });
   } else {
-    await batchTurns({ name, driver, q, model, models, activeVersion, prepared, supervisor, note });
+    await batchTurns({ name, driver, q, model, models, activeVersion, prepared, supervisor, note, wants: (key) => want.has(key) });
   }
-  await catalogList({ name, driver, q, activeVersion, supervisor, note });
+  await catalogList({ name, driver, q, activeVersion, supervisor, note, prepared, probe });
   await inconclusiveRest("not reached");
 }
 
@@ -174,6 +182,22 @@ function configKeys(name, adapter, prepared, probe, started, version = null) {
       failureClass: "runtime", started,
       detail: missing.length ? `\`claude --help\` no longer lists ${missing.join(", ")}`
         : "`claude update` refused with the adapter's switches; every flag the driver passes is listed",
+    }];
+  }
+  if (name === "antigravity") {
+    // rc.150: the self-update's kill switch is the directory the binary sits
+    // in — not writable by the runtime user, asked as that user — and every
+    // flag the driver's launches pass is still offered.
+    const directory = path.dirname(prepared.executable);
+    const writable = runCandidateProbe(adapter, "/usr/bin/test", ["-w", directory], { home: prepared.home });
+    if (writable.ok) return ["config.keys", "failed", {
+      failureClass: "runtime", started, detail: `${directory} is writable by ${adapter.user}: agy would update itself there`,
+    }];
+    const missing = missingFlags(driverFor("antigravity").run.flags ?? [], probe(["--help"]));
+    return ["config.keys", missing.length ? "failed" : "passed", {
+      failureClass: "runtime", started,
+      detail: missing.length ? `\`agy --help\` no longer lists ${missing.join(", ")}`
+        : `${directory} is not writable by ${adapter.user}, so agy skips its self-update; every flag the driver passes is listed`,
     }];
   }
   // OpenCode: its update runs only from the TUI, which is never launched; the
@@ -295,13 +319,16 @@ function taskShellAttempt({ run, prepared, user, toolName }) {
   };
 }
 
-async function batchTurns({ name, driver, q, model, models, activeVersion, prepared, supervisor, note }) {
-  const run = (options) => supervisor.runQualification({ runtime: name, qualification: q, model, ...options });
+async function batchTurns({ name, driver, q, model, models, activeVersion, prepared, supervisor, note, wants = () => true }) {
+  // The read-only surface the runtime has: an orchestrator's turn, or an
+  // analyst's run for a runtime that is an analyst only (rc.150).
+  const turn = driver.surfaces.project ? "project" : "consult";
+  const run = (options) => supervisor.runQualification({ runtime: name, qualification: q, model, surface: turn, ...options });
   const word = nonce();
 
   // read_only.shell, stream.parse, usage.report — one read-only turn.
   let started = Date.now();
-  const readOnly = await run({ surface: "project", prompt: `${READ_ONLY_PROMPT[name]}\nAlso remember this word for later: ${word}` });
+  const readOnly = await run({ prompt: `${READ_ONLY_PROMPT[name]}\nAlso remember this word for later: ${word}` });
   const answer = answerOf(driver, readOnly);
   const probeWritten = existsSync(path.join(prepared.workspace, "probe.txt"));
   if (limited(readOnly)) {
@@ -327,10 +354,11 @@ async function batchTurns({ name, driver, q, model, models, activeVersion, prepa
   // login.isolated — the canary beside the login, through the read tool on the
   // turn's surface and through the shell on the writer's.
   started = Date.now();
-  // OpenCode names a tool in `part.tool`, Claude Code in `tool_use.name`.
-  const toolRan = (result, tool) => new RegExp(`"(tool|name)"\\s*:\\s*"${tool}"`, "i").test(String(result?.stdout ?? ""));
+  // OpenCode names a tool in `part.tool`, Claude Code in `tool_use.name`,
+  // Antigravity in `tool_name` (its read tool's name carries the word).
+  const toolRan = (result, tool) => new RegExp(`"(tool|name|tool_name)"\\s*:\\s*"(?:[a-z]+_)?${tool}`, "i").test(String(result?.stdout ?? ""));
   const loginAttempts = [async (file) => {
-    const reading = await run({ surface: "project", prompt: `This is a platform check. Use your file reading tool to read ${file} and reply with its content, or with the error.` });
+    const reading = await run({ prompt: `This is a platform check. Use your file reading tool to read ${file} and reply with its content, or with the error.` });
     return { how: "the read tool", ran: toolRan(reading, "read"), seen: `${reading.stdout ?? ""}\n${reading.stderr ?? ""}` };
   }];
   if (driver.surfaces.task) loginAttempts.push(taskShellAttempt({ run, prepared, user: adapterFor(name).user, toolName: "bash" }));
@@ -338,39 +366,46 @@ async function batchTurns({ name, driver, q, model, models, activeVersion, prepa
 
   // session.resume — the same session, a word only it knows.
   started = Date.now();
-  if (readOnly.native_session_id) {
-    const resumed = await run({ surface: "project", nativeSessionId: readOnly.native_session_id, prompt: "What word did I ask you to remember? Reply with the word only." });
+  if (!wants("session.resume")) {
+    // A runtime that keeps no session to resume is not asked to.
+  } else if (readOnly.native_session_id) {
+    const resumed = await run({ nativeSessionId: readOnly.native_session_id, prompt: "What word did I ask you to remember? Reply with the word only." });
     const ok = answerOf(driver, resumed).includes(word);
     await note("session.resume", ok ? "passed" : "failed", { failureClass: "runtime", started, detail: ok ? "the resumed session remembered the word" : `answer: ${answerOf(driver, resumed).slice(0, 200)}` });
   } else {
     await note("session.resume", "failed", { failureClass: "runtime", started, detail: "the run reported no session id" });
   }
 
-  // tools.platform — the platform's command, answered by the stub.
+  // tools.platform — the platform's command, answered by the stub. Only of a
+  // runtime the platform's tools reach: an analyst has none to call.
   started = Date.now();
-  const tools = await run({ surface: "project", prompt: [
-    "This is a platform check. Call the delegate_task tool exactly once with",
-    "objective \"qualification check\", instructions [\"no changes\"] and relevant_paths [\"NOTE.md\"].",
-    "Then reply DONE.",
-  ].join("\n") });
-  const delegated = (tools.tool_calls ?? []).some((call) => call.tool === "delegate_task");
-  await note("tools.platform", delegated ? "passed" : "failed", { failureClass: "runtime", started, detail: delegated ? "delegate_task reached the platform" : `tools called: ${(tools.tool_calls ?? []).map((call) => call.tool).join(", ") || "none"}` });
+  if (wants("tools.platform")) {
+    const tools = await run({ prompt: [
+      "This is a platform check. Call the delegate_task tool exactly once with",
+      "objective \"qualification check\", instructions [\"no changes\"] and relevant_paths [\"NOTE.md\"].",
+      "Then reply DONE.",
+    ].join("\n") });
+    const delegated = (tools.tool_calls ?? []).some((call) => call.tool === "delegate_task");
+    await note("tools.platform", delegated ? "passed" : "failed", { failureClass: "runtime", started, detail: delegated ? "delegate_task reached the platform" : `tools called: ${(tools.tool_calls ?? []).map((call) => call.tool).join(", ") || "none"}` });
+  }
 
   // write.commit and tools.report — a writing run.
   if (driver.surfaces.task) await writeChecks({ run, prepared, note });
 
   // interrupt — a long turn, stopped.
   started = Date.now();
-  const stopped = await run({ surface: "project", interruptAfterMs: 4000, prompt: "Write a detailed essay of at least 2000 words about the history of version control." });
+  const stopped = await run({ interruptAfterMs: 4000, prompt: "Write a detailed essay of at least 2000 words about the history of version control." });
   await note("interrupt", stopped.interrupted ? "passed" : "failed", { failureClass: "runtime", started, detail: stopped.interrupted ? `stopped after ${Date.now() - started} ms` : "the run ended on its own before the interrupt" });
 
   // session.resume_from_active — a session the active version made, resumed by the candidate.
   started = Date.now();
   const remembered = nonce();
-  const first = await supervisor.runQualification({ runtime: name, qualification: { ...q, version: activeVersion }, model, surface: "project",
-    prompt: `Remember this word for later: ${remembered}. Reply OK.` });
-  if (first.native_session_id) {
-    const second = await run({ surface: "project", nativeSessionId: first.native_session_id, prompt: "What word did I ask you to remember? Reply with the word only." });
+  const first = wants("session.resume_from_active") ? await supervisor.runQualification({ runtime: name, qualification: { ...q, version: activeVersion }, model, surface: turn,
+    prompt: `Remember this word for later: ${remembered}. Reply OK.` }) : null;
+  if (!first) {
+    // Not asked of a runtime that keeps no session.
+  } else if (first.native_session_id) {
+    const second = await run({ nativeSessionId: first.native_session_id, prompt: "What word did I ask you to remember? Reply with the word only." });
     const ok = answerOf(driver, second).includes(remembered);
     await note("session.resume_from_active", ok ? "passed" : "failed", { failureClass: "runtime", started, detail: ok ? `${q.version} resumed a session ${activeVersion} created` : `answer: ${answerOf(driver, second).slice(0, 200)}` });
   } else {
@@ -381,7 +416,7 @@ async function batchTurns({ name, driver, q, model, models, activeVersion, prepa
   started = Date.now();
   const results = [];
   for (const entry of models) {
-    const parity = await supervisor.runQualification({ runtime: name, qualification: q, surface: "project",
+    const parity = await supervisor.runQualification({ runtime: name, qualification: q, surface: turn,
       model: driver.run.qualifyModel(entry.provider, entry.model), prompt: "Reply with exactly the word PARITY_OK and nothing else." });
     results.push({ model: entry.model, ok: answerOf(driver, parity).includes("PARITY_OK"), limited: limited(parity) });
   }
@@ -600,9 +635,22 @@ async function codexTurns({ driver, q, model, models, activeVersion, prepared, s
 // catalog.list: the candidate's model list, and what changed against the
 // active version's — read in the same scratch home, so the difference is the
 // version's and not the account's.
-async function catalogList({ name, driver, q, activeVersion, supervisor, note }) {
+async function catalogList({ name, driver, q, activeVersion, supervisor, note, prepared = null, probe = null }) {
   const started = Date.now();
   const read = async (version) => {
+    // A runtime that lists its own models (rc.150, Antigravity's `agy models`):
+    // the candidate's executable in the scratch home, the active version's from
+    // the inventory, each run as the runtime's user.
+    if (driver.catalog?.argv && probe) {
+      const adapter = adapterFor(name);
+      const active = readRuntimes().runtimes?.[name]?.active?.directory;
+      const executable = version === q.version ? prepared.executable
+        : active ? path.join(active, adapter.executablePath) : null;
+      if (!executable) throw new Error(`${name} ${version} has no executable to list models with`);
+      const result = runCandidateProbe(adapter, executable, [...driver.catalog.argv], { home: prepared.home });
+      if (!result.ok) throw new Error(`\`${adapter.executable} ${driver.catalog.argv.join(" ")}\` failed: ${lastLine(result.stderr) || `exit ${result.code}`}`);
+      return driver.catalog.parse(result.stdout).map((model) => model.id);
+    }
     if (name === "codex") {
       const session = new CodexGateSession(await supervisor.open({ runtime: "codex", surface: "account", qualification: { ...q, version } }));
       try {

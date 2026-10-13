@@ -5,9 +5,9 @@
 -- role's whole core — never by the runtime's name. So:
 --
 --   * an assignment to a role its runtime does not play is refused by the
---     database, by reason: Codex as an executor, and a runtime nothing
---     registers (Antigravity, before this test registers it) as an
---     orchestrator. OpenCode plays both since 0076;
+--     database, by reason: Codex as an executor, and a runtime not registered
+--     for the role (Antigravity, an analyst since 0157, before this test
+--     registers it as an orchestrator). OpenCode plays both since 0076;
 --   * the mutation: take one core capability away from Codex and Codex, still
 --     registered as the orchestrator, is refused as one — it is the capability
 --     that holds the role up, not the name;
@@ -50,6 +50,8 @@ BEGIN
       'complete_opencode_enrollment','expire_opencode_enrollments','fail_opencode_connection_work',
       'fail_opencode_enrollment','get_operator_opencode_connections','get_operator_opencode_enrollment_status',
       'request_opencode_connection_action','start_opencode_enrollment','store_opencode_enrollment_secret',
+      -- Antigravity's connection (0157), per runtime like Codex's and OpenCode's.
+      'get_operator_antigravity_connection','connect_antigravity_connection','disconnect_antigravity_connection',
       -- Which gateway a runtime's connection reaches, and whose models it names (0083):
       -- identity of the connection, not a permission.
       'fill_connection_gateway','catalog_model_vendor',
@@ -125,10 +127,12 @@ BEGIN
   END IF;
   INSERT INTO runtime_capabilities(runtime_type,capability) VALUES('codex','run.read_only');
 
-  -- A non-Codex orchestrator, registered for the role with its core.
+  -- A non-Codex orchestrator, registered for the role with its core (the
+  -- capabilities 0157 registered it with as an analyst are already there).
   INSERT INTO runtime_roles(runtime_type,role) VALUES('antigravity','orchestrator');
   INSERT INTO runtime_capabilities(runtime_type,capability)
-    SELECT 'antigravity',capability FROM runtime_role_core WHERE role='orchestrator';
+    SELECT 'antigravity',capability FROM runtime_role_core WHERE role='orchestrator'
+  ON CONFLICT DO NOTHING;
   INSERT INTO project_agent_assignments(project_id,agent_id,runtime_profile_id,assignment_role)
     VALUES(v_project,v_other,v_other_profile,'orchestrator') RETURNING id INTO v_other_assignment;
   INSERT INTO tasks(project_id,title,objective,constraints,acceptance_criteria,status,

@@ -180,7 +180,7 @@ export function ModelsCard({ models }: { models: OperatorModels }) {
     <p role="status" className="sr-only">{announcement}</p>
 
     {connections.length === 0
-      ? <p className="type-app-body mt-5 border-t border-line pt-4 text-muted">No connection lists models yet. Connect ChatGPT, OpenCode or Claude in Connections.</p>
+      ? <p className="type-app-body mt-5 border-t border-line pt-4 text-muted">No connection lists models yet. Connect ChatGPT, OpenCode, Claude or Antigravity in Connections.</p>
       : <>
         {groups.length > 1 && <div role="tablist" aria-label="Vendors" className="mt-5 flex flex-wrap gap-1.5">
           {groups.map((name) => <button key={name} type="button" role="tab" aria-selected={name === shownGroup} aria-controls="models-vendor-panel"

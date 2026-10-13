@@ -6,8 +6,8 @@
     "This is the fact `infra-cod update` needs and cannot derive: it decides whether the",
     "old application may keep serving while the migration runs, and whether an",
     "application-only rollback to that release is a rollback or a corruption. SQL cannot",
-    "be asked the question \u2014 a DROP COLUMN and an ADD COLUMN are the same kind of",
-    "statement to a parser \u2014 so every migration declares it, and a migration that",
+    "be asked the question — a DROP COLUMN and an ADD COLUMN are the same kind of",
+    "statement to a parser — so every migration declares it, and a migration that",
     "declares nothing is treated as incompatible.",
     "",
     "`unverifiedThrough` is the boundary of the contract, not a claim about those files.",
@@ -43,11 +43,11 @@
     },
     "0058_revision_executor_and_idempotent_completion.sql": {
       "previousReleaseCompatible": true,
-      "note": "Replaces two function bodies and changes no column, table, constraint or grant. request_revision now copies executor_assignment_id from the previous handoff onto the one it creates \u2014 the field the orchestrator's caller already wrote from outside, so the previous release finds it set either way and its own UPDATE becomes a no-op it guards with 'IS NULL'. submit_worker_completion answers an already-stored report before the liveness check instead of after it; the previous release never reached that branch, and the extra 'repeat' key in the result is ignored by a caller that does not read it."
+      "note": "Replaces two function bodies and changes no column, table, constraint or grant. request_revision now copies executor_assignment_id from the previous handoff onto the one it creates — the field the orchestrator's caller already wrote from outside, so the previous release finds it set either way and its own UPDATE becomes a no-op it guards with 'IS NULL'. submit_worker_completion answers an already-stored report before the liveness check instead of after it; the previous release never reached that branch, and the extra 'repeat' key in the result is ignored by a caller that does not read it."
     },
     "0059_orchestrator_turns_become_runs.sql": {
       "previousReleaseCompatible": true,
-      "note": "Adds a trigger that gives every attempted Codex chat or review job a read-only task run, backfills runs for past attempts, adds a CHECK that an attempted orchestrator job has a run, and redefines finalize_runtime_interrupt and claim_workspace_operation under their existing signatures. The previous release keeps working: its claim receives run_id populated and ignores it, and both redefined functions behave as before for implementation runs. The one reader in the previous release that would misread a turn run \u2014 lock recovery taking the most recent lost run of a project \u2014 is kept correct by construction: a turn run is never marked lost, only failed. What the previous release shows differently is cosmetic: its snapshot's latest run and its health run counts include conversation turns."
+      "note": "Adds a trigger that gives every attempted Codex chat or review job a read-only task run, backfills runs for past attempts, adds a CHECK that an attempted orchestrator job has a run, and redefines finalize_runtime_interrupt and claim_workspace_operation under their existing signatures. The previous release keeps working: its claim receives run_id populated and ignores it, and both redefined functions behave as before for implementation runs. The one reader in the previous release that would misread a turn run — lock recovery taking the most recent lost run of a project — is kept correct by construction: a turn run is never marked lost, only failed. What the previous release shows differently is cosmetic: its snapshot's latest run and its health run counts include conversation turns."
     },
     "0060_workspace_access_grants.sql": {
       "previousReleaseCompatible": true,
@@ -87,7 +87,7 @@
     },
     "0069_review_evidence.sql": {
       "previousReleaseCompatible": true,
-      "note": "Adds review_evidence, review_evidence_bases, review_evidence_deliveries, review_verdicts and publish_preparations with their functions, and redefines finalize_worker_completion, invoke_codex_request_revision, codex_chat_job_context and approve_task_review under their existing signatures, search_path, SECURITY DEFINER and grants; their SQLSTATEs and sentences are unchanged and each refusal gains a reason; codex_chat_job_context changes only the review turn's wording, which no longer calls the workspace read-only. finalize_worker_completion requires evidence only for a run whose base the new supervisor recorded, so the previous release's completions finalize as before. What the previous release meets is approve_task_review refusing a task whose latest implementation has no evidence (review_evidence_missing) \u2014 the fix, not a break: a revision records it. No existing table, column or constraint changes."
+      "note": "Adds review_evidence, review_evidence_bases, review_evidence_deliveries, review_verdicts and publish_preparations with their functions, and redefines finalize_worker_completion, invoke_codex_request_revision, codex_chat_job_context and approve_task_review under their existing signatures, search_path, SECURITY DEFINER and grants; their SQLSTATEs and sentences are unchanged and each refusal gains a reason; codex_chat_job_context changes only the review turn's wording, which no longer calls the workspace read-only. finalize_worker_completion requires evidence only for a run whose base the new supervisor recorded, so the previous release's completions finalize as before. What the previous release meets is approve_task_review refusing a task whose latest implementation has no evidence (review_evidence_missing) — the fix, not a break: a revision records it. No existing table, column or constraint changes."
     },
     "0070_ingress_and_run_mailbox.sql": {
       "previousReleaseCompatible": true,
@@ -103,7 +103,7 @@
     },
     "0073_neutral_job_vocabulary_expand.sql": {
       "previousReleaseCompatible": false,
-      "note": "Widens the runtime_jobs job_type CHECK and the orchestrator-turn CHECK and trigger to admit orchestrator_turn, resume_orchestrator and implementation_run beside the old names, and redefines 27 functions under their existing signatures, grants and search_path: 26 readers now accept both names, and route_outbox_message writes only the new ones. The previous release's application code names the old types itself \u2014 the supervisor's launch context selects job_type='start_implementation' and the orchestrator worker gives review evidence only to 'resume_codex' \u2014 so a job this schema routes would be refused at launch or reviewed without its evidence. Declared incompatible so the coordinator stops every service before the runner. Rows are not rewritten: jobs queued under the old names keep them and this release finishes them. An application-only rollback is not a rollback once a new-named job exists."
+      "note": "Widens the runtime_jobs job_type CHECK and the orchestrator-turn CHECK and trigger to admit orchestrator_turn, resume_orchestrator and implementation_run beside the old names, and redefines 27 functions under their existing signatures, grants and search_path: 26 readers now accept both names, and route_outbox_message writes only the new ones. The previous release's application code names the old types itself — the supervisor's launch context selects job_type='start_implementation' and the orchestrator worker gives review evidence only to 'resume_codex' — so a job this schema routes would be refused at launch or reviewed without its evidence. Declared incompatible so the coordinator stops every service before the runner. Rows are not rewritten: jobs queued under the old names keep them and this release finishes them. An application-only rollback is not a rollback once a new-named job exists."
     },
     "0074_selection_by_role_and_capability.sql": {
       "previousReleaseCompatible": true,
@@ -131,7 +131,7 @@
     },
     "0080_decisions_by_permission.sql": {
       "previousReleaseCompatible": true,
-      "note": "Adds role_holds(role_definition, permission), executable by infra_worker only, and redefines 13 workflow functions (14 definitions) under their existing signatures, grants, SECURITY mode and search_path, with each assignment_role='orchestrator' now role_holds(\u2026,'conversation.hold') and each 'executor' role_holds(\u2026,'implementation.execute'). Every assignment has a built-in definition since 0079, and the built-ins hold exactly those permissions, so every answer is the one it was; role-equivalence.test.mjs shows identical decisions and events for host-shaped scenarios, a follow-up included, and fails on a mutant. The previous release calls the same functions with the same arguments and writes assignments by the word, which 0079's trigger maps to the built-in, so it serves on this schema while the migration runs."
+      "note": "Adds role_holds(role_definition, permission), executable by infra_worker only, and redefines 13 workflow functions (14 definitions) under their existing signatures, grants, SECURITY mode and search_path, with each assignment_role='orchestrator' now role_holds(…,'conversation.hold') and each 'executor' role_holds(…,'implementation.execute'). Every assignment has a built-in definition since 0079, and the built-ins hold exactly those permissions, so every answer is the one it was; role-equivalence.test.mjs shows identical decisions and events for host-shaped scenarios, a follow-up included, and fails on a mutant. The previous release calls the same functions with the same arguments and writes assignments by the word, which 0079's trigger maps to the built-in, so it serves on this schema while the migration runs."
     },
     "0081_roles_are_permission_sets_contract.sql": {
       "previousReleaseCompatible": true,
@@ -408,6 +408,10 @@
     "0156_live_test_findings.sql": {
       "previousReleaseCompatible": true,
       "note": "Adds an AFTER INSERT trigger on runtime_activity_events for runtime.policy.refused, which records a chat event and never fails the insert, and earlier_published_intents; the previous release writes the same activity events and ignores the new chat event."
+    },
+    "0157_antigravity_analyst.sql": {
+      "previousReleaseCompatible": true,
+      "note": "Adds the antigravity provider, its gateway and shape constraints (every row the previous release writes still satisfies them), the antigravity_models catalog source, the runtime's role and capability rows, new connection functions, a defaulted runtime_type column on claude_login_sessions and start_runtime_login/get_runtime_login; recreates catalog_model_vendor, fill_connection_gateway, request_catalog_refresh, upsert_catalog_entries, claude_login_view, start_claude_login, get_claude_login, submit_claude_login_code and claim_claude_logins with the same signatures and grants, each accepting what it accepted before (the claim returns one more key the previous worker ignores)."
     }
   }
 }

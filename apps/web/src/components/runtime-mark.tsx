@@ -1,7 +1,8 @@
 import { runtimeLabel } from "@/lib/runtime-labels";
 
 // Who is speaking, at a glance: each runtime's mark in its vendor's colour —
-// Claude Code in Anthropic's clay, Codex in OpenAI's green, OpenCode in blue.
+// Claude Code in Anthropic's clay, Codex in OpenAI's green, OpenCode in blue,
+// Antigravity in Google's blue.
 // Drawn here as simple glyphs of our own, not the vendors' logos. A runtime
 // the panel does not know keeps the monogram on ink.
 const MARKS: Record<string, { background: string; glyph: React.ReactNode }> = {
@@ -17,6 +18,14 @@ const MARKS: Record<string, { background: string; glyph: React.ReactNode }> = {
     // A prompt: Codex works in the terminal.
     glyph: <g fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
       <path d="m3.5 5 3 3-3 3M8.5 11.5h4"/>
+    </g>,
+  },
+  antigravity: {
+    background: "#4285F4",
+    // An orbit: a dot lifted off its arc.
+    glyph: <g fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+      <path d="M3 11.5c2.6 1.2 7.4 1.2 10 0"/>
+      <circle cx="8" cy="5.2" r="2" fill="currentColor" stroke="none"/>
     </g>,
   },
   opencode: {

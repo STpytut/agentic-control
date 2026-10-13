@@ -123,7 +123,13 @@ test("every runtime this product ships declares interrupt — so the list below 
   assert.deepEqual(interruptible.map((driver) => driver.name).sort(), allDrivers().map((driver) => driver.name).sort());
 });
 
-for (const driver of interruptible) {
+// A task's run: the orchestrator's turn or the executor's job. An analyst's
+// run (0147) is stopped through its consultation (0151), not the task card,
+// so a runtime that is an analyst only (Antigravity, rc.150) has no job here.
+const onTasks = interruptible.filter((driver) => allAdapters().find((adapter) => adapter.name === driver.name)
+  .roles.some((role) => role === "orchestrator" || role === "executor"));
+
+for (const driver of onTasks) {
   test(`a running ${driver.name} job shows Stop, from its driver's declaration`, { skip }, async () => {
     const fixture = inFlightJobFor(driver);
     // The profile row says nothing about interrupt — rc.38's Codex row.

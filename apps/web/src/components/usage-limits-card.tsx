@@ -140,7 +140,7 @@ export function UsageLimitsCard({ initial }: { initial: OperatorUsage | null }) 
       {!usage
         ? <p className="type-meta m-0 text-muted">Limits and usage are not available on this server yet.</p>
         : connections.length === 0
-          ? <p className="type-meta m-0 text-muted">No model connections yet. Connect ChatGPT, Claude or OpenCode in Connections.</p>
+          ? <p className="type-meta m-0 text-muted">No model connections yet. Connect ChatGPT, Claude, OpenCode or Antigravity in Connections.</p>
           : <div className="grid">{connections.map((connection) => <ConnectionSection key={connection.connectionId} connection={connection} now={now}/>)}</div>}
     </Card>
   );
