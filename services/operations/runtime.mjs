@@ -194,10 +194,11 @@ function pinnedKey() {
 
 // A runtime Google serves from its own manifest, not from the npm registry
 // (Antigravity, rc.150). The manifest is `{version, url, sha512}` for the
-// newest build only and nobody signs it, so a version this release pins is
-// resolved from the pinned record and the manifest is not asked; a version it
-// does not pin is taken from the manifest only when the manifest names exactly
-// that version, and the record says the digest came from an unsigned manifest.
+// newest build only and nobody signs it, so only a version this release pins
+// is installed: it is resolved from the pinned record and the manifest is not
+// asked. A newer build the manifest offers is reported by the watch and needs
+// a release that pins its URL and digest before it can be installed — an
+// unsigned manifest does not get to choose the bytes this host executes.
 export function isVendorManifestSource(adapter) {
   return adapter?.source?.kind === "vendor-manifest";
 }
@@ -217,17 +218,10 @@ async function resolveFromVendorManifest(adapter, version, { fetchJson }) {
     return { name, version, tarball: pinned.url, integrity: integrityOfHex(pinned.sha512, `${name} ${version}'s pinned record`),
       signatures: [], source: "release-pinned" };
   }
-  const manifest = await fetchJson(adapter.source.manifest, { maxBytes: 1024 * 1024 });
-  const offered = String(manifest?.version ?? "");
-  if (offered !== version) {
-    throw new RuntimeError(
-      `${name} ${version} is not pinned by this release, and the vendor's manifest offers ${offered || "no version"}; `
-      + "only the version the manifest names can be installed without a pin",
-    );
-  }
-  if (!/^https:\/\/\S+$/.test(String(manifest.url ?? ""))) throw new RuntimeError(`the vendor's manifest for ${name} ${version} names no https tarball`);
-  return { name, version, tarball: manifest.url, integrity: integrityOfHex(manifest.sha512, `the vendor's manifest for ${name} ${version}`),
-    signatures: [], source: "vendor-manifest" };
+  throw new RuntimeError(
+    `${name} ${version} is not pinned by this release; a version of ${name} is installed only from a release `
+    + "that pins its URL and sha512 (the vendor's manifest is unsigned)",
+  );
 }
 
 export async function resolvePackage(adapter, version, { fetchJson = defaultFetchJson } = {}) {
@@ -341,13 +335,11 @@ export async function watchRuntime(name, { fetchJson = defaultFetchJson, activeV
 // a signature from somebody else.
 export function verifyRegistrySignature(resolved, { key = null, keyId = REGISTRY_KEY_ID } = {}) {
   // A vendor-manifest runtime carries no registry signature: what vouches for
-  // the tarball is the sha512 this release pinned (checked by verifyIntegrity
-  // against the bytes downloaded), or the vendor's unsigned manifest, and the
-  // record names which. The pinned key is not read for it.
-  if (resolved.source === "release-pinned" || resolved.source === "vendor-manifest") {
+  // the tarball is the sha512 this release pinned, checked by verifyIntegrity
+  // against the bytes downloaded. The pinned key is not read for it.
+  if (resolved.source === "release-pinned") {
     const digest = String(resolved.integrity).slice("sha512-".length, "sha512-".length + 16);
-    const by = resolved.source === "release-pinned" ? "release-pinned-sha512" : "vendor-manifest-sha512-unsigned";
-    return { keyId: `${by}:${digest}`, message: `${resolved.name}@${resolved.version}:${resolved.integrity}` };
+    return { keyId: `release-pinned-sha512:${digest}`, message: `${resolved.name}@${resolved.version}:${resolved.integrity}` };
   }
   key ??= pinnedKey();
   const signature = resolved.signatures.find((candidate) => candidate.keyid === keyId);

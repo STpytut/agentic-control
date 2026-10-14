@@ -1321,7 +1321,7 @@ test("probation closes a passed one, rolls back a failing one, and leaves a runn
 });
 
 // rc.150: Antigravity is served from Google's manifest, not the npm registry.
-test("a vendor-manifest runtime resolves a pinned version from the release, and an unpinned one only when the manifest names it", async () => {
+test("a vendor-manifest runtime installs only a version the release pins; the unsigned manifest cannot choose the bytes", async () => {
   const { resolvePackage, verifyRegistrySignature, verifyIntegrity, watchRuntime, directoryUpdateControl, isVendorManifestSource } = await import("../runtime.mjs");
   const adapter = adapterFor("antigravity");
   assert.equal(isVendorManifestSource(adapter), true);
@@ -1337,15 +1337,10 @@ test("a vendor-manifest runtime resolves a pinned version from the release, and 
   // The pinned digest is what the download is held to.
   assert.throws(() => verifyIntegrity({ sha512: "AAAA", sha256: "x" }, pinned.integrity), /does not match the integrity/);
 
-  // Unpinned: the manifest, and only the version it names.
+  // Unpinned: refused, and the manifest is not even asked.
   const manifest = { version: "1.3.5", url: "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.3.5-1/linux-x64/cli_linux_x64.tar.gz", sha512: "ab".repeat(64) };
-  const offered = await resolvePackage(adapter, "1.3.5", { fetchJson: async () => manifest });
-  assert.equal(offered.source, "vendor-manifest");
-  assert.equal(offered.tarball, manifest.url);
-  assert.match(verifyRegistrySignature(offered, { key: "unused" }).keyId, /^vendor-manifest-sha512-unsigned:/);
-  await assert.rejects(resolvePackage(adapter, "1.3.6", { fetchJson: async () => manifest }), /not pinned by this release, and the vendor's manifest offers 1\.3\.5/);
-  await assert.rejects(resolvePackage(adapter, "1.3.5", { fetchJson: async () => ({ ...manifest, sha512: "short" }) }), /carries no sha512/);
-  await assert.rejects(resolvePackage(adapter, "1.3.5", { fetchJson: async () => ({ ...manifest, url: "http://plain" }) }), /names no https tarball/);
+  await assert.rejects(resolvePackage(adapter, "1.3.5", { fetchJson: async () => assert.fail("the manifest was asked for an unpinned version") }),
+    /1\.3\.5 is not pinned by this release; a version of antigravity-cli is installed only from a release that pins/);
 
   // The watch: the manifest's one version, dated by the watch that saw it.
   const now = Date.parse("2026-10-13T10:00:00Z");

@@ -31,9 +31,10 @@ build only and nobody signs it. So:
 * the release **pins** the versions it was shown with — the tarball's URL and
   sha512 (`pinnedReleases` in the registry). A pinned version is resolved from
   the pin and the manifest is not asked;
-* a version the release does not pin is taken from the manifest only when the
-  manifest names exactly that version, and the install record says the digest
-  came from an unsigned manifest (`signedBy: vendor-manifest-sha512-unsigned:…`);
+* a version the release does not pin is refused: the unsigned manifest does not
+  get to choose the bytes this host executes. The watch still reports a newer
+  build the manifest offers, and a release that pins its URL and sha512 is what
+  makes it installable;
 * the tarball holds one file, `antigravity`; it is unpacked into the usual
   root-owned, 0755 version directory and reached as `agy` through the link on
   PATH, like the others.
