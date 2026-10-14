@@ -354,19 +354,19 @@ jobs:
 
       # The installer does not install the agent CLIs (deploy/install-manifest.json,
       # agentRuntimes). That has to be visible rather than surface later as ENOENT
-      # on the first agent task, so doctor reports both, and this asserts it does.
+      # on the first agent task, so doctor reports each one, and this asserts it does.
       - name: Agent runtimes are reported, not assumed
         run: |
           set -euo pipefail
-          jq -e '[.checks[] | select(.check | startswith("runtime.agent_cli."))] | length == 3' \
+          jq -e '[.checks[] | select(.check | startswith("runtime.agent_cli."))] | length == 4' \
             < "${RUNNER_TEMP}/doctor.json"
           jq -r '.checks[] | select(.check | startswith("runtime.agent_cli.")) | "\(.check): \(.severity) — \(.message)"' \
             < "${RUNNER_TEMP}/doctor.json"
           # Whatever the runtime users can see is what the supervisor will exec.
-          for user in codex-worker opencode-worker claude-worker; do
+          for user in codex-worker opencode-worker claude-worker antigravity-worker; do
             echo "--- ${user} ---"
             sudo runuser -u "${user}" -- env PATH=/usr/local/bin:/usr/bin:/bin sh -c \
-              'command -v codex || echo "codex: not installed"; command -v opencode || echo "opencode: not installed"'
+              'command -v codex || echo "codex: not installed"; command -v opencode || echo "opencode: not installed"; command -v agy || echo "agy: not installed"'
           done
 
       - name: Long-running units are active
