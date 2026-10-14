@@ -9,6 +9,7 @@
 
 import { allAdapters } from "../../operations/runtime-adapters.mjs";
 import { driverProblems } from "./capabilities.mjs";
+import { antigravityDriver } from "./antigravity.mjs";
 import { claudeDriver } from "./claude.mjs";
 import { codexDriver } from "./codex.mjs";
 import { opencodeDriver } from "./opencode.mjs";
@@ -22,6 +23,7 @@ const DRIVERS = Object.freeze({
   codex: codexDriver,
   opencode: opencodeDriver,
   claude: claudeDriver,
+  antigravity: antigravityDriver,
 });
 
 // Pure in both lists, like registryGaps, so a test can hand it a fictional

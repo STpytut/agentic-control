@@ -141,12 +141,14 @@ Then connect your accounts:
 | --- | --- |
 | Codex (ChatGPT) | In the panel, Settings → Connections. First allow it in ChatGPT: Settings → Security → device code authorization for Codex. |
 | Claude Code | In the panel, Settings → Connections: Sign in with Claude, then paste the code it shows. |
+| Antigravity | Optional, an analyst only. Install it (`sudo infra-cod runtime install antigravity`), then in the panel, Settings → Connections: Sign in with Google (Antigravity) and paste the code within a minute. See [docs/ANTIGRAVITY.md](docs/ANTIGRAVITY.md). |
 | GitHub | In the panel, Settings → Connections: create the GitHub App and choose the repositories it may use. |
 
 To add an agent later, or to see what is ready:
 
 ```bash
 sudo infra-cod runtime install opencode
+sudo infra-cod runtime install antigravity
 sudo infra-cod runtime list
 sudo infra-cod doctor
 ```

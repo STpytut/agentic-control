@@ -1324,7 +1324,9 @@ async function runConsultBatch(request, driver, control = new LaunchControl()) {
     }
     return {
       exit_code: exitCode, signal, interrupted, response: driver.stream.answer(stdout),
-      failure: driver.stream.failure?.(stdout) ?? "", stderr: stderr.slice(-2000),
+      // The stream's reason, or stderr's where the runtime puts it there
+      // (Antigravity's AGY_ERROR line, rc.150).
+      failure: driver.stream.failure?.(stdout, stderr) ?? "", stderr: stderr.slice(-2000),
       resolved_model: resolvedModel, snapshot_sha: snapshot.head, snapshot_skipped: snapshot.skipped.length,
     };
   } finally {
@@ -3231,6 +3233,41 @@ async function runClaudeModelList({ timeoutMs = 25_000 } = {}) {
   }
 }
 
+// The models a runtime lists itself, as its own user with its active
+// executable (rc.150: Antigravity's `agy models`). The driver names the
+// command and reads the lines; only ids and names come back.
+const runtimeModelListRunning = new Set();
+async function runRuntimeModelList(driver, { timeoutMs = 25_000 } = {}) {
+  if (!driver.catalog?.argv || typeof driver.catalog.parse !== "function") return { error: "unsupported" };
+  if (runtimeModelListRunning.has(driver.name)) return { error: "busy" };
+  runtimeModelListRunning.add(driver.name);
+  try {
+    const adapter = adapterFor(driver.name);
+    const child = spawn("/usr/sbin/runuser", ["-u", adapter.user, "--", "/usr/bin/env", "-i",
+      `HOME=${adapter.home}`, `PATH=${runtimePath}`, "LANG=C.UTF-8", ...driver.run.environment(), driver.executable, ...driver.catalog.argv],
+    { cwd: adapter.home, stdio: ["ignore", "pipe", "ignore"] });
+    let stdout = "";
+    let tooLong = false;
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      if (Buffer.byteLength(stdout, "utf8") > 256 * 1024) { tooLong = true; child.kill("SIGKILL"); }
+    });
+    const exitCode = await new Promise((resolve) => {
+      const timer = setTimeout(() => { child.kill("SIGKILL"); resolve("timeout"); }, timeoutMs);
+      child.once("error", () => { clearTimeout(timer); resolve("error"); });
+      child.once("close", (code) => { clearTimeout(timer); resolve(code); });
+    });
+    if (exitCode === "timeout") return { error: "timeout" };
+    if (exitCode === "error") return { error: "unrunnable" };
+    if (tooLong) return { error: "unparsed" };
+    if (exitCode !== 0) return { error: `exit_${exitCode}` };
+    return { models: driver.catalog.parse(stdout) };
+  } finally {
+    runtimeModelListRunning.delete(driver.name);
+  }
+}
+
 function asRuntimeUser(user, command) {
   return execFileSync("/usr/sbin/runuser", ["-u", user, "--", ...command], { encoding: "utf8", timeout: 60_000 });
 }
@@ -3331,15 +3368,18 @@ async function cleanupQualification(request) {
 // the call and creates nothing; the result says which tools were called.
 async function runQualificationBatch(request, driver, control = new LaunchControl()) {
   const spec = surfaceOf(driver, request.surface);
-  if (spec.transport !== "batch" || spec.workspace !== "grant") {
-    throw new Error(`${driver.name}'s ${request.surface} surface is not a task or turn batch run`);
+  // A turn's or a task's surface, or an analyst's (rc.150): a snapshot run is
+  // read-only by construction, and a runtime that is an analyst only is
+  // qualified on it.
+  if (spec.transport !== "batch" || (spec.workspace !== "grant" && spec.workspace !== "snapshot")) {
+    throw new Error(`${driver.name}'s ${request.surface} surface is not a task, turn or analyst batch run`);
   }
   assertCapability(driver, spec.capability);
   if (typeof request.model !== "string" || request.model.length < 2 || request.model.length > 200) throw new Error("qualification model is invalid");
   if (typeof request.prompt !== "string" || request.prompt.length === 0 || request.prompt.length > 16 * 1024) throw new Error("qualification prompt length is invalid");
   const adapter = adapterFor(driver.name);
   const { workspace, home, executable } = qualificationLaunch(driver, request.qualification);
-  const readOnly = spec.grantMode === "read_only";
+  const readOnly = spec.grantMode === "read_only" || spec.workspace === "snapshot";
   const runId = randomUUID();
   const capability = randomUUID();
   const toolCalls = [];
@@ -3470,6 +3510,9 @@ async function handle(socket, request) {
       send(socket, { request_id: request.request_id, ok: true, result: await runProviderUsageProbe() });
     } else if (request.type === "claude_model_list") {
       send(socket, { request_id: request.request_id, ok: true, result: await runClaudeModelList() });
+    } else if (request.type === "runtime_model_list") {
+      // rc.150: a runtime that lists its own models (Antigravity's `agy models`).
+      send(socket, { request_id: request.request_id, ok: true, result: await runRuntimeModelList(driverFor(String(request.runtime ?? ""))) });
     } else if (request.type === "qualification_prepare" || request.type === "qualification_cleanup") {
       // Stage 12 W3: the scratch repository and home a candidate runs in, made
       // before its checks and removed after them.

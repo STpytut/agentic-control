@@ -72,3 +72,76 @@ test("the account surface's stdin takes one code on one line, and nothing else",
   validateClaudeAccountInput("abcdefgh#ijkl\n", state);
   assert.throws(() => validateClaudeAccountInput("abcdefgh#ijkl\n", state), /one code/);
 });
+
+// rc.150: the same flow signs Antigravity in. Its link is Google's, on stderr;
+// a run that ends well without asking was signed in already; and it waits a
+// minute for the code, which is the panel's deadline too.
+import { processRuntimeLogin } from "../claude-login.mjs";
+import { driverFor } from "../../runtime-supervisor/drivers/index.mjs";
+
+const GOOGLE_URL = "https://accounts.google.com/o/oauth2/v2/auth?client_id=x&redirect_uri=y&code_challenge=z";
+const antigravityLogin = driverFor("antigravity").input.login;
+
+function fakeAgy({ signedIn = false, accept = true } = {}) {
+  const handle = new EventEmitter();
+  handle.stdout = new PassThrough();
+  handle.stderr = new PassThrough();
+  handle.stdin = new PassThrough();
+  handle.received = [];
+  setImmediate(() => {
+    if (signedIn) {
+      handle.stdout.write('{"event":"init","conversation_id":"c"}\n{"event":"result","result":{"status":"SUCCESS","response":"OK"}}\n');
+      setImmediate(() => handle.emit("close", 0));
+      return;
+    }
+    handle.stderr.write(`Authentication required. Please visit the URL to log in:\n${GOOGLE_URL}\n\nOr, paste the authorization code here and press Enter: `);
+  });
+  handle.stdin.on("data", (chunk) => {
+    handle.received.push(String(chunk));
+    if (accept) handle.stdout.write('{"event":"result","result":{"status":"SUCCESS","response":"OK"}}\n');
+    else handle.stdout.write('{"event":"result","result":{"status":"ERROR","error":"authentication failed or timed out"}}\n');
+    setImmediate(() => handle.emit("close", accept ? 0 : 1));
+  });
+  return handle;
+}
+
+test("Antigravity's Google link reaches the panel from stderr, and the pasted code reaches the same process", async () => {
+  const handle = fakeAgy();
+  const { steps, record } = recorder(2);
+  const result = await processRuntimeLogin(session(), { open: async () => handle, record, workerId: "w", codePollMs: 1, login: antigravityLogin });
+  assert.equal(result.status, "succeeded");
+  assert.deepEqual(handle.received, ["abcdefgh#ijklmnop\n"]);
+  assert.deepEqual(steps.filter((s) => s !== "take_code"), [`url:${GOOGLE_URL}`, "succeeded"]);
+});
+
+test("an Antigravity already signed in answers without a link, and the sign-in succeeds at once", async () => {
+  const handle = fakeAgy({ signedIn: true });
+  const { steps, record } = recorder(Infinity);
+  const result = await processRuntimeLogin(session(), { open: async () => handle, record, workerId: "w", codePollMs: 1, login: antigravityLogin });
+  assert.deepEqual(result, { status: "succeeded", already: true });
+  assert.deepEqual(steps, ["succeeded"]);
+  assert.deepEqual(handle.received, []);
+});
+
+test("a code Google refuses ends Antigravity's sign-in as failed, naming the runtime", async () => {
+  const { steps, record } = recorder(0);
+  const result = await processRuntimeLogin(session(), { open: async () => fakeAgy({ accept: false }), record, workerId: "w", codePollMs: 1, login: antigravityLogin });
+  assert.equal(result.status, "failed");
+  assert.match(result.error, /^Antigravity did not accept the code/);
+  assert.ok(steps.at(-1).startsWith("failed:"));
+});
+
+test("Antigravity's minute for the code is the deadline, even inside the session's fifteen", async () => {
+  const handle = fakeAgy();
+  const { steps, record } = recorder(Infinity);
+  let clock = Date.now();
+  // The clock moves a third of a minute per poll once the link is shown.
+  const shown = () => steps.some((step) => step.startsWith("url:"));
+  const result = await processRuntimeLogin({ id: "s1", expires_at: new Date(clock + 15 * 60_000).toISOString() }, {
+    open: async () => handle, record, workerId: "w", codePollMs: 1, login: antigravityLogin,
+    now: () => clock, sleep: async () => { if (shown()) clock += 20_000; else await new Promise((resolve) => setTimeout(resolve, 2)); },
+  });
+  assert.equal(result.status, "failed");
+  assert.match(result.error, /waits 60 seconds for the code/);
+  assert.deepEqual(handle.received, []);
+});

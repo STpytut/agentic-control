@@ -61,6 +61,30 @@ export function claudeTokens(usage) {
     output: output - thinking, reasoning: thinking });
 }
 
+// Antigravity's `result.usage` (agy 1.3.4): input_tokens, output_tokens,
+// thinking_tokens, cache_read_tokens and total_tokens. Whether the input
+// includes the cache read and the output the thinking is read from the total
+// it reports: when the four parts add up to it they are disjoint; when the
+// input and output alone do, the other two are inside them and are taken out.
+// Neither shape is guessed when the total says something else: the parts are
+// then kept as reported, which can only over-count.
+export function antigravityTokens(usage) {
+  const u = obj(usage);
+  if (!u) return null;
+  const input = count(u.input_tokens);
+  const output = count(u.output_tokens);
+  const thinking = count(u.thinking_tokens);
+  const cacheRead = count(u.cache_read_tokens);
+  const total = count(u.total_tokens);
+  const nested = total > 0 && total === input + output && (thinking > 0 || cacheRead > 0);
+  return tokens({
+    input: nested ? Math.max(0, input - cacheRead) : input,
+    cacheRead,
+    output: nested ? Math.max(0, output - thinking) : output,
+    reasoning: thinking,
+  });
+}
+
 // OpenCode's `step_finish` part.tokens: already input without cache and output
 // without reasoning (opencode:session.ts:338-402).
 export function openCodeTokens(value) {

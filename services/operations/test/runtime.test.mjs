@@ -69,7 +69,15 @@ test("the executable is taken from the package that contains it, not the one peo
   // Claude Code's wrapper runs a postinstall to pick a platform; this is the
   // platform package, whose binary the host's install found at package/claude.
   assert.deepEqual(adapterFor("claude").packageFor("2.1.270"), { name: "@anthropic-ai/claude-code-linux-x64", version: "2.1.270" });
-  assert.deepEqual(runtimeNames().sort(), ["claude", "codex", "opencode"]);
+  assert.deepEqual(runtimeNames().sort(), ["antigravity", "claude", "codex", "opencode"]);
+  // rc.150: Antigravity is not an npm package. Its one pinned version carries
+  // the tarball's URL and sha512 in the release, and the tarball holds one file.
+  const antigravity = adapterFor("antigravity");
+  assert.equal(antigravity.source.kind, "vendor-manifest");
+  assert.match(antigravity.pinnedReleases["1.3.4"].url, /^https:\/\/storage\.googleapis\.com\/antigravity-public\//);
+  assert.match(antigravity.pinnedReleases["1.3.4"].sha512, /^[0-9a-f]{128}$/);
+  assert.equal(antigravity.archiveTopLevel, "antigravity");
+  assert.equal(antigravity.executable, "agy");
 });
 
 test("a runtime silenced by its environment carries the switches on every start, and signs in on the host", () => {
@@ -110,7 +118,11 @@ test("every adapter names the user, the home and the way to silence self-updates
     } else {
       assert.ok(adapter.autoUpdate.reason, `${name} must say why it has no verified auto-update control`);
     }
-    assert.ok(adapter.executablePath.startsWith("package/"), "npm tarballs put everything under package/");
+    if (adapter.source?.kind === "vendor-manifest") {
+      assert.equal(adapter.executablePath, adapter.archiveTopLevel, "a vendor tarball's one file is its executable");
+    } else {
+      assert.ok(adapter.executablePath.startsWith("package/"), "npm tarballs put everything under package/");
+    }
   }
 });
 
@@ -1306,4 +1318,46 @@ test("probation closes a passed one, rolls back a failing one, and leaves a runn
   });
   assert.deepEqual(stuck, { failed: 1, rolledBack: 0 });
   assert.match(err.at(-1), /failed its probation and could not be rolled back: codex has no previous version/);
+});
+
+// rc.150: Antigravity is served from Google's manifest, not the npm registry.
+test("a vendor-manifest runtime installs only a version the release pins; the unsigned manifest cannot choose the bytes", async () => {
+  const { resolvePackage, verifyRegistrySignature, verifyIntegrity, watchRuntime, directoryUpdateControl, isVendorManifestSource } = await import("../runtime.mjs");
+  const adapter = adapterFor("antigravity");
+  assert.equal(isVendorManifestSource(adapter), true);
+  assert.equal(isVendorManifestSource(adapterFor("codex")), false);
+
+  // Pinned: nobody is asked.
+  const pinned = await resolvePackage(adapter, "1.3.4", { fetchJson: async () => assert.fail("the manifest was asked for a pinned version") });
+  assert.equal(pinned.tarball, adapter.pinnedReleases["1.3.4"].url);
+  assert.equal(pinned.source, "release-pinned");
+  assert.equal(pinned.integrity, `sha512-${Buffer.from(adapter.pinnedReleases["1.3.4"].sha512, "hex").toString("base64")}`);
+  const signature = verifyRegistrySignature(pinned, { key: "unused" });
+  assert.match(signature.keyId, /^release-pinned-sha512:/);
+  // The pinned digest is what the download is held to.
+  assert.throws(() => verifyIntegrity({ sha512: "AAAA", sha256: "x" }, pinned.integrity), /does not match the integrity/);
+
+  // Unpinned: refused, and the manifest is not even asked.
+  const manifest = { version: "1.3.5", url: "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.3.5-1/linux-x64/cli_linux_x64.tar.gz", sha512: "ab".repeat(64) };
+  await assert.rejects(resolvePackage(adapter, "1.3.5", { fetchJson: async () => assert.fail("the manifest was asked for an unpinned version") }),
+    /1\.3\.5 is not pinned by this release; a version of antigravity-cli is installed only from a release that pins/);
+
+  // The watch: the manifest's one version, dated by the watch that saw it.
+  const now = Date.parse("2026-10-13T10:00:00Z");
+  const watched = await watchRuntime("antigravity", { fetchJson: async () => manifest, activeVersion: "1.3.4", now: () => now });
+  assert.deepEqual(watched, { runtime: "antigravity", activeVersion: "1.3.4", error: "",
+    versions: [{ version: "1.3.5", published_at: "2026-10-13T10:00:00.000Z", deprecated: false }] });
+  const same = await watchRuntime("antigravity", { fetchJson: async () => ({ ...manifest, version: "1.3.4" }), activeVersion: "1.3.4" });
+  assert.deepEqual(same.versions, []);
+  const odd = await watchRuntime("antigravity", { fetchJson: async () => ({ version: "latest" }), activeVersion: "1.3.4" });
+  assert.match(odd.error, /names no exact version/);
+
+  // The self-update control is the directory: root's, not group- or world-writable.
+  const stat = (mode, uid = 0) => () => ({ isDirectory: () => true, mode: 0o40000 | mode, uid });
+  const ok = directoryUpdateControl(adapter, "/opt/infra-cod/runtimes/antigravity/1.3.4", { stat: stat(0o755), uid: 0 });
+  assert.equal(ok.verified, true);
+  assert.equal(ok.setting, adapter.autoUpdate.setting);
+  assert.match(directoryUpdateControl(adapter, "/x", { stat: stat(0o775), uid: 0 }).reason, /writable by its group or others/);
+  assert.match(directoryUpdateControl(adapter, "/x", { stat: stat(0o755, 1001), uid: 0 }).reason, /owned by uid 1001, not root/);
+  assert.match(directoryUpdateControl(adapter, "/x", { stat: () => { throw new Error("ENOENT"); } }).reason, /could not be read/);
 });

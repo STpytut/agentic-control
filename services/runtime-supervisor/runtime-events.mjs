@@ -1,4 +1,4 @@
-import { claudeRateLimits, claudeTokens, codexRateLimits, codexTokens, costUsd, openCodeTokens } from "./usage-limits.mjs";
+import { antigravityTokens, claudeRateLimits, claudeTokens, codexRateLimits, codexTokens, costUsd, openCodeTokens } from "./usage-limits.mjs";
 
 // What a normalised event may carry into runtime_activity_events.details. A
 // closed list, because these rows are written from a runtime's own stdout and
@@ -232,5 +232,53 @@ export function normalizeCodexExecEvent(event) {
     eventType: "runtime.turn.completed", phase: "finalizing", summary: "Codex ended the turn with an error",
     details: cleanDetails({ status: "error", error: String(event.error?.message ?? event.message ?? "").slice(0, 200) || undefined }),
   };
+  return null;
+}
+
+// Antigravity's `--output-format stream-json` (rc.150, agy 1.3.4 on the host):
+// one object per line with an `event` — `init` (the conversation id, the
+// tools, the model), `step_update` (a step of the conversation, ACTIVE then
+// DONE: a tool call with its name and, when done, its output or error; the
+// agent's response as text deltas; the user's input; a checkpoint) and
+// `result` (the status, the response, the usage). The usage is the result's;
+// a step's own usage, where agy sends one, is kept raw. No cost: a Google
+// sign-in reports none.
+export function normalizeAntigravityEvent(event) {
+  if (!event || typeof event !== "object" || Array.isArray(event)) return null;
+  const kind = String(event.event ?? "");
+  if (kind === "init") return {
+    eventType: "runtime.turn.started", phase: "running_turn", summary: "Antigravity started the turn",
+    details: cleanDetails({ model: typeof event.init?.model === "string" ? event.init.model : undefined }),
+  };
+  if (kind === "step_update") {
+    const step = event.step_update && typeof event.step_update === "object" ? event.step_update : {};
+    const state = String(step.state ?? "");
+    if (step.step_type === "tool") {
+      const tool = String(step.tool_name ?? step.tool_info?.name ?? "tool").slice(0, 80);
+      const error = typeof step.tool_info?.error === "string" ? step.tool_info.error : undefined;
+      const status = state === "DONE" ? (error ? "error" : "completed") : "requested";
+      return {
+        eventType: "runtime.tool.updated", phase: "running_turn",
+        summary: `${tool} ${status === "requested" ? "requested" : status === "error" ? "failed" : "completed"}`,
+        details: cleanDetails({ tool, status, error }),
+      };
+    }
+    if (step.step_type === "agent_response" && state === "DONE") return {
+      eventType: "runtime.output.completed", phase: "running_turn", summary: "Antigravity produced an agent response",
+      details: cleanDetails({ characters: String(step.text_delta ?? "").length }),
+    };
+    return null;
+  }
+  if (kind === "result") {
+    const result = event.result && typeof event.result === "object" ? event.result : {};
+    const ok = result.status === "SUCCESS";
+    return {
+      eventType: "runtime.turn.usage", phase: "finalizing",
+      summary: ok ? "Antigravity finished the turn" : "Antigravity ended the turn with an error",
+      details: cleanDetails({ reason: typeof result.status === "string" ? result.status.toLowerCase() : undefined,
+        status: ok ? "completed" : "error", error: ok ? undefined : (typeof result.error === "string" ? result.error : undefined),
+        tokens: antigravityTokens(result.usage) ?? undefined }),
+    };
+  }
   return null;
 }

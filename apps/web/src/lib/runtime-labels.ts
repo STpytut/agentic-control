@@ -12,6 +12,7 @@ export const RUNTIME_LABELS: Readonly<Record<string, string>> = {
   codex: "Codex",
   opencode: "OpenCode",
   claude: "Claude Code",
+  antigravity: "Antigravity",
 };
 
 export type RuntimeRole = "orchestrator" | "executor" | "analyst" | "pr_reviewer";
@@ -20,6 +21,9 @@ export const RUNTIME_ROLES: Readonly<Record<string, readonly RuntimeRole[]>> = {
   codex: ["orchestrator", "executor", "pr_reviewer"],
   opencode: ["orchestrator", "executor", "analyst"],
   claude: ["orchestrator", "executor", "analyst"],
+  // rc.150: an analyst only — agy takes no MCP server, so the platform's tools
+  // cannot reach it (services/runtime-supervisor/drivers/antigravity.mjs).
+  antigravity: ["analyst"],
 };
 
 export function runtimeLabel(value: string) {

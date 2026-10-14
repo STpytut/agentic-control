@@ -130,7 +130,7 @@ test("each descriptor answers what the registry now promises", () => {
   // assignment (11.2 N4 for the orchestrator; Stage 12 X1 for the executor):
   // every runtime serving a type plays the role that type is for.
   for (const [type, owners] of jobs) {
-    const role = type === "implementation_run" ? "executor" : "orchestrator";
+    const role = type === "implementation_run" ? "executor" : type === "consultation_run" ? "analyst" : "orchestrator";
     for (const owner of owners) assert.ok(adapterFor(owner).roles.includes(role), `${type} is served by ${owner}, which does not play ${role}`);
   }
   assert.deepEqual([...jobs.get("implementation_run")].sort(), ["claude", "codex", "opencode"]);

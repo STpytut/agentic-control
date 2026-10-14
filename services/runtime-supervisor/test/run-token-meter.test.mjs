@@ -43,7 +43,7 @@ test("no limit, or one out of range, never stops a run", () => {
     assert.equal(meter.add({ type: "step_finish", part: { tokens: { input: 50_000_000 } } }), false);
   }
   assert.equal(runTokenLimit("250000"), 250_000);
-  assert.equal(createTokenMeter("antigravity", 10_000).add({ type: "assistant" }), false, "a runtime the meter cannot read adds nothing");
+  assert.equal(createTokenMeter("fictional", 10_000).add({ type: "assistant" }), false, "a runtime the meter cannot read adds nothing");
 });
 
 test("an analyst's report renders bounded, and nothing for anything else", () => {

@@ -11,12 +11,13 @@
 // |                | arrive as separate events, same usage)   |                      |
 // | OpenCode       | `step_finish` part.tokens                | every model step     |
 // | Codex (`exec`) | `turn.completed` usage                   | the end of the turn  |
+// | Antigravity    | the `result` event's usage               | the end of the run   |
 //
 // So a Codex executor is held to its limit only after its turn: a run past it
 // that has not reported is ended as over the limit, one that has reported is
 // done. The meter is pure: the supervisor feeds it lines and stops the run.
 
-import { claudeTokens, openCodeTokens } from "./usage-limits.mjs";
+import { antigravityTokens, claudeTokens, openCodeTokens } from "./usage-limits.mjs";
 import { codexExecTokens } from "./runtime-events.mjs";
 
 const obj = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : null);
@@ -34,6 +35,7 @@ const READERS = Object.freeze({
   },
   opencode: (raw) => (raw?.type === "step_finish" ? openCodeTokens(raw.part?.tokens) : null),
   codex: (raw) => (raw?.type === "turn.completed" ? codexExecTokens(raw.usage) : null),
+  antigravity: (raw) => (raw?.event === "result" ? antigravityTokens(raw.result?.usage) : null),
 });
 
 export const RUN_TOKEN_LIMIT_MIN = 10_000;

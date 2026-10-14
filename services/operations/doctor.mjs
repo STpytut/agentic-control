@@ -24,7 +24,7 @@ import { detectLayout } from "./layout-migration.mjs";
 import { HOST_REQUIREMENTS, adapterFor, runtimeNames, versionInRange } from "./runtime-adapters.mjs";
 import { INSTALLATION_LAYOUT } from "./installation-layout.mjs";
 import { RUNTIMES_FILE, executableDigest, readRuntimes } from "./runtime-inventory.mjs";
-import { authenticationOf, probeHostRequirement, reconciliationOf, runAsRuntimeUser } from "./runtime.mjs";
+import { authenticationOf, directoryUpdateControl, probeHostRequirement, reconciliationOf, runAsRuntimeUser } from "./runtime.mjs";
 import { activeQualification, capabilityVerification, pairOf } from "../runtime-supervisor/drivers/capabilities.mjs";
 import { driverFor } from "../runtime-supervisor/drivers/index.mjs";
 import { staleRunToolSockets } from "../runtime-supervisor/worker-tool-socket.mjs";
@@ -796,6 +796,7 @@ const RUNTIME_PATH = ["/usr/local/bin", "/usr/bin", "/bin"];
 // number tells an operator to fix the wrong thing.
 export async function checkAgentRuntimes({
   probe = runAsRuntimeUser, runtimes = null, hostProbe = probeHostRequirement, hashExecutable = executableDigest,
+  stat = lstatSync, exists = existsSync, list = readdirSync,
 } = {}) {
   const checks = [];
   const inventory = runtimes ?? (() => {
@@ -933,6 +934,33 @@ export async function checkAgentRuntimes({
       }
     }
     checks.push(digest);
+
+    // A runtime whose self-update is stopped by its directory (rc.150,
+    // Antigravity): the tree on disk is still root's and not writable by
+    // anybody else, or the control is gone whatever the record says.
+    if (adapter.autoUpdate?.mechanism === "directory") {
+      const tree = new Check(`runtime.executable_directory.${name}`);
+      const control = directoryUpdateControl(adapter, entry.active.directory, { stat });
+      if (control.verified) tree.pass(`${name}'s executable directory ${entry.active.directory} is root's and not writable by ${adapter.user}; its self-update skips`);
+      else tree.fail(`${name}'s self-update is no longer held back by its directory: ${control.reason}`);
+      checks.push(tree);
+    }
+    // Helper binaries a runtime fetches at run time into its own state
+    // (Antigravity's agentapi and webm_encoder): nothing this release
+    // verified, reported so the operator knows they are there.
+    if (adapter.helperBinaries) {
+      const helpers = new Check(`runtime.helper_binaries.${name}`);
+      const directory = path.join(adapter.home, adapter.helperBinaries);
+      let names = [];
+      try { names = exists(directory) ? list(directory).slice(0, 10) : []; } catch { names = []; }
+      if (names.length) {
+        helpers.warn(`${name} downloaded helper binaries into ${directory} (${names.join(", ")}); `
+          + "they run as its user with its state writable, and no release verified them");
+      } else {
+        helpers.pass(`${name} has downloaded no helper binaries into ${directory}`);
+      }
+      checks.push(helpers);
+    }
 
     // What each version of this runtime needs from the host (Stage 12 W1).
     // Needed by the active version: a failure. Needed only by other versions:

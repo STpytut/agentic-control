@@ -26,6 +26,7 @@
 import readline from "node:readline";
 import { queryJson, closePool } from "./db.mjs";
 import { claudeDiscovery } from "./catalog-claude.mjs";
+import { antigravityDiscovery } from "./catalog-antigravity.mjs";
 import { RuntimeSupervisorClient, cancelThrough, retryWhileRuntimeBusy } from "../runtime-supervisor/client.mjs";
 import { OPENCODE_ACCOUNT_LABELS, openCodeProviderFor } from "../runtime-supervisor/opencode-account-channel.mjs";
 import { catalogReasoningLevels } from "../runtime-supervisor/drivers/reasoning.mjs";
@@ -300,6 +301,23 @@ async function discoverClaudeModels({ supervisor, connection }) {
   return discovery;
 }
 
+// --- Antigravity (rc.150) ----------------------------------------------------
+
+// `agy models`, read by the supervisor as antigravity-worker. A list that
+// could not be read names its source as unread, and the refresh's end leaves
+// the models listed before as they were (0137).
+async function discoverAntigravityModels({ supervisor, connection }) {
+  let answer;
+  try {
+    answer = await supervisor.listRuntimeModels("antigravity");
+  } catch (error) {
+    answer = { error: safeError(error) };
+  }
+  const discovery = antigravityDiscovery(answer, connection);
+  if (discovery.unreadSources.length) process.stderr.write(`${JSON.stringify({ type: "catalog-refresh.antigravity-models", error: String(answer?.error ?? "no answer"), kept: discovery.unreadSources })}\n`);
+  return discovery;
+}
+
 // --- Refresh processing -----------------------------------------------------
 
 function connectionMetadata(connection) {
@@ -327,6 +345,7 @@ async function discoverModels(item, leaseExpiresAt = null) {
       return { entries: await discoverOpenCodeModels({ supervisor, connection, providerId, leaseExpiresAt }), unreadSources: [] };
     }
     if (item.provider === "claude") return await discoverClaudeModels({ supervisor, connection });
+    if (item.provider === "antigravity") return await discoverAntigravityModels({ supervisor, connection });
     throw new Error(`catalog discovery is unsupported for provider ${item.provider}`);
   } finally {
     supervisor.close();

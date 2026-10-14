@@ -347,6 +347,11 @@ export class RuntimeSupervisorClient extends EventEmitter {
 
   // The models Claude's subscription offers, read as claude-worker by the
   // release's probe: ids and names, or why there are none.
+  // rc.150: the models a runtime lists itself (its driver's `catalog`).
+  async listRuntimeModels(runtime) {
+    return this.#request({ type: "runtime_model_list", runtime });
+  }
+
   async listClaudeModels() {
     return this.#request({ type: "claude_model_list", runtime: "claude" });
   }

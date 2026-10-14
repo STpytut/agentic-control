@@ -71,7 +71,9 @@ test("a fictional third runtime is refused by name in every constraint and valid
     `append_runtime_activity_event validates p_runtime_type against ${accepted}`,
     `ensure_structural_runtime_profile validates p_runtime_type against ${accepted}`,
     `upsert_catalog_entries validates COALESCE(v_entry->>'runtime_type','') against ${accepted}`,
-    "request_catalog_refresh validates v_connection.provider against [claude, codex, opencode], the registry [claude, codex, fictional, opencode]",
+    "request_catalog_refresh validates v_connection.provider against [antigravity, claude, codex, opencode], the registry [antigravity, claude, codex, fictional, opencode]",
+    // 0157 (rc.150): the paste-code sign-ins name their runtime.
+    `control_plane.claude_login_sessions.claude_login_sessions_runtime_type_check accepts ${accepted}`,
     "control_plane.provider_connections.provider_connections_provider_check does not accept the provider fictional",
     "control_plane.provider_login_sessions.provider_login_sessions_provider_check does not accept the provider fictional",
     "runtime_jobs_job_type_check does not accept fictional_turn, which fictional serves",

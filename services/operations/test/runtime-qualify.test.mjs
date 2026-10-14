@@ -18,7 +18,10 @@ test("the suite is one check per capability the driver claims", () => {
   // Every executor writes (Stage 12 X1/X2).
   for (const name of ["codex", "opencode", "claude"]) assert.ok(keys(name).includes("write.commit"), `${name} writes`);
   assert.ok(!keys("claude").includes("catalog.list"), "Claude has no model list");
-  for (const name of ["codex", "opencode", "claude"]) {
+  // rc.150: an analyst only — reads, lists its models, writes nothing, calls no tool.
+  assert.ok(keys("antigravity").includes("catalog.list"), "Antigravity lists its models");
+  for (const key of ["write.commit", "tools.platform", "tools.report"]) assert.ok(!keys("antigravity").includes(key), `Antigravity: ${key}`);
+  for (const name of ["codex", "opencode", "claude", "antigravity"]) {
     assert.ok(keys(name).includes("read_only.shell"), `${name}: the check that would have refused Codex 0.158.0`);
     // Every capability a driver claims is covered by some check, or knowingly left to another.
     const covered = new Set(QUALIFICATION_CHECKS.map((check) => check.capability).filter(Boolean));

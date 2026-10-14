@@ -7,6 +7,7 @@ import { getOperatorUsageLimits } from "@/lib/usage-data";
 import { getSidebarProjects } from "@/lib/sidebar-data";
 import { getTelegramConnection } from "@/lib/telegram-connection";
 import { getOperatorClaudeState } from "@/lib/claude-connections";
+import { getOperatorAntigravityState } from "@/lib/antigravity-connections";
 import { getOperatorCodexState } from "@/lib/codex-connections";
 import { getOperatorOpenCodeState } from "@/lib/opencode-connections";
 import { getOperatorGitHubConnections } from "@/lib/github-connections";
@@ -62,6 +63,7 @@ export async function runSelftest() {
       ["getOperatorUsageLimits", () => getOperatorUsageLimits(ownerId)],
       ["getTelegramConnection", () => getTelegramConnection(ownerId)],
       ["getOperatorClaudeState", () => getOperatorClaudeState(ownerId)],
+      ["getOperatorAntigravityState", () => getOperatorAntigravityState(ownerId)],
       ["getOperatorCodexState", () => getOperatorCodexState(ownerId)],
       ["getOperatorOpenCodeState", () => getOperatorOpenCodeState(ownerId)],
       ["getOperatorGitHubConnections", () => getOperatorGitHubConnections(ownerId)],

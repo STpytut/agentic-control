@@ -465,6 +465,103 @@ const ADAPTERS = {
     hostRequirements: [{ requirement: "landlock", versions: "*" }],
     qualificationState: [".claude/.credentials.json", ".claude.json"],
   },
+
+  // Google Antigravity CLI, `agy` (rc.150). Everything below was measured by
+  // the spike on the production host at 1.3.4 (2026-10-13; docs/ANTIGRAVITY.md).
+  // An analyst only: its headless interface mirrors Claude Code's (stream-json
+  // in and out), but it has no MCP configuration flag, so the platform's tools
+  // cannot reach it — neither the orchestrator's commands nor an executor's
+  // reports — and the two roles that need them stay closed to it.
+  antigravity: {
+    name: "antigravity",
+    recommendedVersion: "1.3.4",
+    // The host from the spike used the same name: a system user, nologin.
+    user: "antigravity-worker",
+    home: "/home/antigravity-worker",
+    // The Google sign-in token (0600) and the CLI's settings, under `.gemini`.
+    credentialState: "/home/antigravity-worker/.gemini",
+    loginState: [".gemini"],
+    // Three, verified under the read-only launch: with exactly these writable
+    // agy runs and a workspace write is EACCES from the kernel.
+    writableState: [
+      "/home/antigravity-worker/.gemini",
+      "/home/antigravity-worker/.config/antigravity",
+      "/home/antigravity-worker/.cache",
+    ],
+    executable: "agy",
+
+    display: { label: "Antigravity" },
+    // Not yet measured on the host: on the high side, like Codex's. Every run
+    // records its peak.
+    memoryEstimateMb: 400,
+    roles: ["analyst"],
+    dispatch: {
+      jobTypes: ["consultation_run"],
+      connectionProvider: "antigravity",
+    },
+    units: [],
+    sandboxPaths: [
+      { path: "/home/antigravity-worker", mode: 0o750 },
+      { path: "/home/antigravity-worker/.gemini", mode: 0o700 },
+      { path: "/home/antigravity-worker/.config", mode: 0o700 },
+      { path: "/home/antigravity-worker/.config/antigravity", mode: 0o700 },
+      { path: "/home/antigravity-worker/.cache", mode: 0o700 },
+    ],
+    // The login and the conversations.
+    backup: ["/home/antigravity-worker/.gemini"],
+    configOverrides: [],
+
+    // Not an npm package: Google serves the CLI from its own auto-updater
+    // manifest, `{version, url, sha512}`, and the installer it offers has no
+    // version flag. The release pins the versions it was shown with — the
+    // tarball's URL and its sha512 — and resolves a pinned version from here
+    // without asking anybody (runtime.mjs, resolvePackage). A version the
+    // release does not pin is taken from the manifest only when the manifest
+    // names exactly it; the manifest is unsigned, and the record says so.
+    source: {
+      kind: "vendor-manifest",
+      name: "antigravity-cli",
+      manifest: "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/linux_amd64.json",
+    },
+    pinnedReleases: {
+      "1.3.4": {
+        url: "https://storage.googleapis.com/antigravity-public/antigravity-cli/1.3.4-5524158944247808/linux-x64/cli_linux_x64.tar.gz",
+        sha512: "dbdacfc5a1d9874fbbea3a21026d3990b4728e2e3487fd0316dc53cae9a3091023f969425828f3e2e0fadda43cea07dd978ea96f4ca7c202adf2201f419c56dd",
+      },
+    },
+    packageFor(version) {
+      return { name: "antigravity-cli", version };
+    },
+    // The tarball holds one file, `antigravity`, at its top level — no
+    // `package/` directory. It is installed root-owned as the tree's one
+    // member and reached as `agy` through the usual link on PATH.
+    archiveTopLevel: "antigravity",
+    executablePath: "antigravity",
+
+    versionProbe: ["--version"],
+    authProbe: ["models"],
+    // The OAuth token agy writes when no D-Bus session holds a keyring, tested
+    // as the runtime user by exit code and never read.
+    authEvidence: { path: ".gemini/antigravity-cli/antigravity-oauth-token", of: "Antigravity's Google sign-in" },
+
+    // agy updates itself in the background and has no setting that stops it.
+    // What stops it is its directory: when the directory holding the binary
+    // is not writable it logs "Directory ... is not fully accessible (readable:
+    // true, writable: false), skipping update" and runs on. Every installed
+    // tree is root-owned and 0755 (runtime.mjs), which is the kill switch;
+    // doctor and qualification check it stays so.
+    autoUpdate: {
+      mechanism: "directory",
+      setting: "a root-owned executable directory the runtime user cannot write",
+      verifiedAgainst: "agy 1.3.4 on the host, 2026-10-13: the self-updater logs 'is not fully accessible "
+        + "(readable: true, writable: false), skipping update' when its directory is not writable (docs/ANTIGRAVITY.md)",
+    },
+    // Helper binaries agy downloads at runtime into its own state (agentapi,
+    // webm_encoder): not blocked in this release; doctor warns when they are there.
+    helperBinaries: ".gemini/antigravity-cli/bin",
+    hostRequirements: [{ requirement: "landlock", versions: "*" }],
+    qualificationState: [".gemini/antigravity-cli/antigravity-oauth-token", ".gemini/antigravity-cli/settings.json"],
+  },
 };
 
 // What a runtime needs from the host that the host does not give every process,
@@ -540,12 +637,6 @@ export function allAdapters() {
   return Object.values(ADAPTERS);
 }
 
-// Names the database accepts as a runtime type and this installation does not
-// provision. The schema was written for three runtimes and the product ships two;
-// the third is planned, not installed. Declared here so the comparison with the
-// CHECK constraints is exact in both directions: a name the database accepts is
-// either an adapter or listed here with its reason, and removing it from here
-// without a migration fails that comparison.
 // Who owns a project's workspace between runs. A run takes the tree for its
 // runtime's user and gives it back to this one when it ends. It was "the
 // runtime that plays the orchestrator" while only one did; with a second
@@ -554,9 +645,11 @@ export function allAdapters() {
 // in the tree as it rests.
 export const WORKSPACE_RESTING_RUNTIME = "codex";
 
-export const RESERVED_RUNTIME_NAMES = Object.freeze({
-  antigravity: "planned in PRODUCT_SPEC; accepted by the schema since 0001, never provisioned",
-});
+// Names the database accepts as a runtime type and this installation does not
+// provision, each with its reason, so the comparison with the CHECK constraints
+// is exact in both directions. Empty since rc.150: `antigravity`, accepted by
+// the schema since 0001 and reserved here while it was planned, is provisioned.
+export const RESERVED_RUNTIME_NAMES = Object.freeze({});
 
 // How a runtime's credentials are referenced from the database. The reference
 // names the runtime and its Unix user, so moving the user (WP-5c) moves every

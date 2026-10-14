@@ -171,7 +171,7 @@ test("a surface a driver does not have, or carries another way, is refused befor
     await assert.rejects(client.run({ runtime: "claude", surface: "chat" }), /claude has no "chat" surface/);
     await assert.rejects(client.account({ runtime: "codex", operation: "status" }),
       /codex's account surface is a channel, not a local_server/);
-    await assert.rejects(client.open({ runtime: "antigravity", surface: "project" }), (error) => error.code === "unknown_runtime");
+    await assert.rejects(client.open({ runtime: "fictional", surface: "project" }), (error) => error.code === "unknown_runtime");
     assert.deepEqual(frames, []);
   });
 });

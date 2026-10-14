@@ -788,13 +788,13 @@ setup_users_groups() {
   # group that is not created first makes `useradd --gid codex-worker` fail and the
   # whole clean install with it.
   local g u
-  for g in infra-web infra-control infra-cod-github agent-workspace opencode-worker caddy codex-worker claude-worker; do
+  for g in infra-web infra-control infra-cod-github agent-workspace opencode-worker caddy codex-worker claude-worker antigravity-worker; do
     getent group "${g}" >/dev/null || groupadd --system "${g}"
   done
   for u in infra-web infra-control infra-cod-github caddy; do
     getent passwd "${u}" >/dev/null || useradd --system --gid "${u}" --home-dir "${PREFIX}/var/lib/${u}" --shell /usr/sbin/nologin "${u}"
   done
-  for u in codex-worker opencode-worker claude-worker; do
+  for u in codex-worker opencode-worker claude-worker antigravity-worker; do
     getent passwd "${u}" >/dev/null || useradd --system --gid "${u}" --create-home --shell /usr/sbin/nologin "${u}"
   done
   # These two memberships are how the control plane reaches the OpenCode worker
@@ -840,6 +840,11 @@ readonly RUNTIME_HOME_PATHS=(
   /home/opencode-worker/.config/opencode/tools
   /home/claude-worker
   /home/claude-worker/.claude
+  /home/antigravity-worker
+  /home/antigravity-worker/.gemini
+  /home/antigravity-worker/.config
+  /home/antigravity-worker/.config/antigravity
+  /home/antigravity-worker/.cache
 )
 
 # A runtime path that is not a plain directory is a refusal with a name.

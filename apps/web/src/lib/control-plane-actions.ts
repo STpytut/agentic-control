@@ -209,7 +209,7 @@ function taskTitle(message: string, value: unknown) {
 
 async function ownedProjectForAction(kind: string, body: Record<string, unknown>, ownerId: string) {
   if (kind === "create_project" || kind.startsWith("github_") || kind.startsWith("codex_")
-      || kind.startsWith("opencode_") || kind.startsWith("claude_") || kind.startsWith("telegram_") || kind.startsWith("offsite_") || kind === "catalog_refresh"
+      || kind.startsWith("opencode_") || kind.startsWith("claude_") || kind.startsWith("antigravity_") || kind.startsWith("telegram_") || kind.startsWith("offsite_") || kind === "catalog_refresh"
       || kind === "model_pin" || kind === "model_unpin"
       || kind === "model_check" || kind === "runtime_update") return "";
   let sql: string;
@@ -828,6 +828,26 @@ export async function performControlPlaneAction(body: Record<string, unknown>, o
   }
   if (kind === "claude_disconnect") {
     return executeJson(`SELECT disconnect_claude_connection(:'owner_id'::uuid,:'connection_id'::uuid,:'actor',:'correlation')::text;`,
+      { owner_id: operator.userId, connection_id: uuid(body.connectionId, "connectionId"), actor, correlation });
+  }
+
+  // rc.150 (0157): Antigravity, by the same paste-code flow. The sign-in is a
+  // runtime login session naming its runtime; the code goes to the account
+  // worker and is never read back.
+  if (kind === "antigravity_connect") {
+    return executeJson(`SELECT connect_antigravity_connection(:'owner_id'::uuid,:'actor',:'correlation')::text;`,
+      { owner_id: operator.userId, actor, correlation });
+  }
+  if (kind === "antigravity_login_start") {
+    return executeJson(`SELECT start_runtime_login(:'owner_id'::uuid,'antigravity')::text;`, { owner_id: operator.userId });
+  }
+  if (kind === "antigravity_login_code") {
+    if (typeof body.code !== "string" || body.code.length > 512) throw new Error("code is invalid");
+    return executeJson(`SELECT submit_claude_login_code(:'owner_id'::uuid,:'session_id'::uuid,:'code')::text;`,
+      { owner_id: operator.userId, session_id: uuid(body.sessionId, "sessionId"), code: body.code });
+  }
+  if (kind === "antigravity_disconnect") {
+    return executeJson(`SELECT disconnect_antigravity_connection(:'owner_id'::uuid,:'connection_id'::uuid,:'actor',:'correlation')::text;`,
       { owner_id: operator.userId, connection_id: uuid(body.connectionId, "connectionId"), actor, correlation });
   }
 

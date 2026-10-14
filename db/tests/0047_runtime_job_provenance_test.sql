@@ -72,7 +72,8 @@ BEGIN
   -- registering a driver would.
   INSERT INTO runtime_roles(runtime_type,role) VALUES('antigravity','executor');
   INSERT INTO runtime_capabilities(runtime_type,capability)
-    SELECT 'antigravity',capability FROM runtime_role_core WHERE role='executor';
+    SELECT 'antigravity',capability FROM runtime_role_core WHERE role='executor'
+  ON CONFLICT DO NOTHING;
   INSERT INTO runtime_profiles(runtime_type,adapter_version,runtime_version,provider_type,model)
     VALUES('antigravity','test','test','google','antigravity-provenance') RETURNING id INTO v_other_profile;
   INSERT INTO agents(name,role,runtime_profile_id) VALUES('prov-codex','architect',v_codex_profile) RETURNING id INTO v_codex;
